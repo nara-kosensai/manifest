@@ -9,6 +9,14 @@
 #   (rootのみ読める0600のままだと、CIからのsshユーザーでkubectlが使えない)。
 set -euo pipefail
 
+# get.k3s.io のインストーラは非rootでも内部でsudoに自動昇格するが、その昇格は
+# このスクリプトの以降の処理(/var/lib/rancher/k3s/server/manifests への書き込み等)
+# には引き継がれない。スクリプト全体を一貫してroot権限で実行するため、
+# 非rootで呼ばれた場合はここでsudoに自己再実行する。
+if [ "$(id -u)" -ne 0 ]; then
+  exec sudo --preserve-env=TLS_SAN "$0" "$@"
+fi
+
 TLS_SAN="${TLS_SAN:-}"
 
 INSTALL_ARGS=(
