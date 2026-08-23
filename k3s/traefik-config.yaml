@@ -26,9 +26,15 @@ spec:
   valuesContent: |-
     service:
       type: ClusterIP
+    # このクラスタは単一テナント(1人の運用者が全namespaceを管理)であり、
+    # namespace分離バイパス系の脆弱性(例: CVE-2026-71325)が意味を持つ
+    # マルチテナント環境ではないため、cross-namespaceのIngressRoute参照を許可する。
+    # ExternalName Service経由の迂回も試したが、それには別途
+    # allowExternalNameServices が必要になり複雑さが増すだけだったため、
+    # シンプルに直接のnamespace跨ぎ参照に戻した。
     providers:
       kubernetesCRD:
-        allowCrossNamespace: false
+        allowCrossNamespace: true
     metrics:
       prometheus:
         enabled: true

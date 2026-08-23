@@ -35,8 +35,11 @@ config/
 - `k3s/alloy-logging.yaml` — Grafana AlloyのDaemonSet(全namespaceのPodログをLokiへ)。
 - `k3s/local-path-retain-storageclass.yaml` — 消えて困るデータ用の`Retain`StorageClass。
 - `k8s/base/ingress/security-headers.yaml` — 全namespace共通のセキュリティヘッダーMiddleware
-  (2026kosensaiリポジトリにも同一内容を複製配置。cross-namespace Middleware参照は
-  Traefikの既知の脆弱性(namespace分離バイパス)を避けるため使わない設計)。
+  (2026kosensaiリポジトリにも同一内容を複製配置、単純にファイル管理を分けるため)。
+  なお`prod`/`test`のIngressRouteは`web-static`namespaceのServiceをcross-namespaceで
+  直接参照する。このクラスタは単一テナント運用のため、Traefikの
+  `providers.kubernetesCRD.allowCrossNamespace: true`(`k3s/traefik-config.yaml`)を
+  有効にしている(namespace分離バイパス系の脆弱性はマルチテナント環境でのみ意味を持つ)。
 - `k8s/base/web-static/` — 過去年度アーカイブ(`www-archive`)+ storybook。
 - `k8s/base/network/` — cloudflared(公開Web用トンネル)。
 - `k8s/base/monitoring/` — Loki, Grafana, Prometheus, node-exporter。
