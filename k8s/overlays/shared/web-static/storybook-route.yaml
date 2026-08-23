@@ -1,0 +1,15 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: storybook
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`storybook.nara-kosensai.com`)
+      middlewares:
+        - name: security-headers
+      services:
+        - name: storybook
+          port: 80

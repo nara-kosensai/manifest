@@ -1,0 +1,87 @@
+# GF_SECURITY_ADMIN_PASSWORD と GF_AUTH_GITHUB_CLIENT_SECRET はSecret
+# (grafana-secrets, infra/README.mdの手順で一度きり手動投入)から、
+# それ以外の非機密設定はここに直接書く。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path-retain
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      securityContext:
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.0.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SERVER_DOMAIN
+              value: grafana.nara-kosensai.com
+            - name: GF_SERVER_ROOT_URL
+              value: https://grafana.nara-kosensai.com
+            - name: GF_AUTH_GITHUB_ENABLED
+              value: "true"
+            - name: GF_AUTH_GITHUB_ALLOW_SIGN_UP
+              value: "true"
+            - name: GF_AUTH_GITHUB_CLIENT_ID
+              value: Ov23liPCEvp0gTVSCe3d
+            - name: GF_AUTH_GITHUB_SCOPES
+              value: "user:email,read:org"
+            - name: GF_AUTH_GITHUB_AUTH_URL
+              value: https://github.com/login/oauth/authorize
+            - name: GF_AUTH_GITHUB_TOKEN_URL
+              value: https://github.com/login/oauth/access_token
+            - name: GF_AUTH_GITHUB_API_URL
+              value: https://api.github.com/user
+            - name: GF_AUTH_GITHUB_ALLOWED_USERS
+              value: "fumikun,371tti,iwarch,stln,tabosan"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-secrets
+                  key: admin-password
+            - name: GF_AUTH_GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-secrets
+                  key: github-client-secret
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: grafana-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000

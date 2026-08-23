@@ -1,0 +1,61 @@
+# Grafana Alloy を DaemonSet として導入し、全namespaceのPodログを収集して
+# k3s上で稼働するLoki(infra/k8s/base/monitoring, monitoring namespace)へ
+# クラスタ内Service DNS経由で転送する。
+#
+# 旧構成では docker の `loki` logging driver を各コンテナに直接設定していたが、
+# k3s (containerd) にはその機構がないため、ノード上のログファイルを
+# スクレイプする方式に置き換える。Lokiもクラスタ内Serviceとして動くため、
+# (ホストの3100番に直接依存していたVPSネイティブ時代と異なり)
+# hostNetworkは不要。
+#
+# k3s の HelmChart CR を使い、これも /var/lib/rancher/k3s/server/manifests/
+# に置くことでクラスタ起動時に自動適用される(手動 helm install は不要)。
+# ただしLoki自体はCIが `kubectl apply -k overlays/shared` するまで存在しない
+# ため、初回起動直後はAlloyのpush先接続エラーが出るが自己復旧する。
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: alloy
+  namespace: kube-system
+spec:
+  repo: https://grafana.github.io/helm-charts
+  chart: alloy
+  targetNamespace: monitoring
+  createNamespace: true
+  valuesContent: |-
+    controller:
+      type: daemonset
+    alloy:
+      configMap:
+        content: |-
+          discovery.kubernetes "pods" {
+            role = "pod"
+          }
+
+          discovery.relabel "pods" {
+            targets = discovery.kubernetes.pods.targets
+
+            rule {
+              source_labels = ["__meta_kubernetes_namespace"]
+              target_label  = "namespace"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_name"]
+              target_label  = "pod"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_container_name"]
+              target_label  = "container"
+            }
+          }
+
+          loki.source.kubernetes "pods" {
+            targets    = discovery.relabel.pods.output
+            forward_to = [loki.write.local.receiver]
+          }
+
+          loki.write "local" {
+            endpoint {
+              url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+            }
+          }

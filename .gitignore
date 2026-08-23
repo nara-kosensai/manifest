@@ -1,1 +1,9 @@
 terraform.tfvars
+
+# 本番シークレット平文(ENCRYPTION_KEY, AUTH_SECRET, POSTGRES_PASSWORD, SMTP_PASSWORD等)を
+# 含むため、絶対にコミットしない。k3s移行後は2026kosensai/infra/README.mdの手順で
+# 一度きり手動でk8s Secretとして投入する。
+infisical/.env
+
+# GF_AUTH_GITHUB_CLIENT_SECRET が平文で埋め込まれているため同様にコミットしない。
+grafana/docker-compose.yml

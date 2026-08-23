@@ -1,0 +1,34 @@
+# k3s に同梱される Traefik を、ノードの公開インターフェースにポートを
+# 一切バインドしない構成にする HelmChartConfig。
+#
+# 外部通信は Cloudflare Tunnel (cloudflared) 経由のみとし、cloudflared は
+# クラスタ内部から traefik.kube-system.svc.cluster.local:80 に到達できれば
+# 十分なため、Service を ClusterIP にする(LoadBalancer/NodePortにしない)。
+# --disable=servicelb (install.sh) と合わせて二重に防止する。
+#
+# k3s はこのファイルを /var/lib/rancher/k3s/server/manifests/ に置くと
+# 自動的に適用する(HelmChartConfig CRDはTraefikコントローラのHelmリリースを
+# 上書きするための k3s 独自のカスタムリソース)。
+# 効いているのは `service.type: ClusterIP` の1行のみ:LoadBalancer/NodePortでは
+# なくClusterIPにすることで、そもそもホストの物理ポートを一切bindしなくなる
+# (--disable=servicelbと合わせて二重に保証)。他の `ports.*` 系フィールドは
+# Traefik Helmチャートのバージョンによってスキーマが変わりやすいため、
+# ここでは触らずデフォルトのままにする。
+#
+# 適用後、必ず `kubectl get svc -n kube-system traefik` で
+# TYPE=ClusterIP になっていることを確認すること。
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      type: ClusterIP
+    providers:
+      kubernetesCRD:
+        allowCrossNamespace: false
+    metrics:
+      prometheus:
+        enabled: true

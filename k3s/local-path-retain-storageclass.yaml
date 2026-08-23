@@ -1,0 +1,11 @@
+# k3s標準の local-path StorageClass は reclaimPolicy: Delete のため、
+# PVCやnamespaceを誤って削除するとディスク上の実データも即座に消える。
+# DB・アップロード画像など消えて困るデータは、同じ local-path
+# プロビジョナーを使いつつ reclaimPolicy: Retain のこちらを使う。
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-path-retain
+provisioner: rancher.io/local-path
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain

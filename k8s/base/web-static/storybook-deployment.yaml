@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storybook
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storybook
+  template:
+    metadata:
+      labels:
+        app: storybook
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: storybook
+          image: ghcr.io/fumikun/2026kosensai-storybook:latest
+          ports:
+            - containerPort: 80

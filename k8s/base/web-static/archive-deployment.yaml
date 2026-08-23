@@ -1,0 +1,23 @@
+# 過去年度アーカイブ(2017-2025)。www リポジトリ自身のCIでビルド・push
+# されるイメージを配信するだけ。singleton(prod/test共通)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: www-archive
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: www-archive
+  template:
+    metadata:
+      labels:
+        app: www-archive
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: www-archive
+          image: ghcr.io/nara-kosensai/www-archive:latest
+          ports:
+            - containerPort: 80

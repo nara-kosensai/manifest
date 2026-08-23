@@ -1,0 +1,101 @@
+name: Deploy shared platform config to k3s
+
+# ここでデプロイするのは特定サービスに紐づかない共有プラットフォーム設定
+# (cloudflared, Grafana/Loki/Prometheus, Infisical, 過去年度アーカイブ, storybook)。
+# アプリ本体(backend/frontend/db/pgadmin/website)は 2026kosensai リポジトリが
+# 自身のCIで独立にデプロイする。
+#
+# 秘密情報(grafana-secrets, infisical-env, cloudflared-credentials, web-static用
+# ghcr-pull)はこのワークフローでは一切扱わない。README.mdの手順で一度きり手動投入する
+# (infisical-envはInfisical自身の秘密情報のため、Infisical経由での取得が循環依存になる)。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    name: Sync k3s bootstrap + shared manifests to VPS
+    runs-on: ubuntu-latest
+    environment:
+      name: production-vps
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install cloudflared
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          latest_version=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/cloudflare/cloudflared/releases/latest | jq -r '.tag_name')
+
+          if [ -z "${latest_version}" ] || [ "${latest_version}" = "null" ]; then
+            echo "::error::Could not resolve latest cloudflared release version"
+            exit 1
+          fi
+
+          mkdir -p /tmp/cloudflared
+
+          asset_id=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/cloudflare/cloudflared/releases/tags/${latest_version}" | jq -r '.assets[] | select(.name == "cloudflared-linux-amd64") | .id')
+
+          if [ -z "${asset_id}" ] || [ "${asset_id}" = "null" ]; then
+            echo "::error::Could not find cloudflared-linux-amd64 asset for ${latest_version}"
+            exit 1
+          fi
+
+          digest=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/cloudflare/cloudflared/releases/assets/${asset_id}" | jq -r '.digest')
+
+          if [ -z "${digest}" ] || [ "${digest}" = "null" ]; then
+            echo "::error::GitHub API did not return a digest for asset id ${asset_id}"
+            exit 1
+          fi
+
+          curl -sL -H "Authorization: Bearer ${GH_TOKEN}" -o /tmp/cloudflared/cloudflared "https://github.com/cloudflare/cloudflared/releases/download/${latest_version}/cloudflared-linux-amd64"
+
+          expected_hash="${digest#sha256:}"
+          echo "${expected_hash}  /tmp/cloudflared/cloudflared" | sha256sum -c -
+
+          chmod +x /tmp/cloudflared/cloudflared
+
+      - name: Set up SSH and Cloudflare Tunnel Config
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          cat <<EOF2 > ~/.ssh/config
+          Host vps
+            HostName 127.0.0.1
+            Port 22
+            User ${{ secrets.SSH_USER }}
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+            ProxyCommand /tmp/cloudflared/cloudflared access tcp --hostname ${{ secrets.SSH_HOST }} --id ${{ secrets.CLOUDFLARED_CLIENT_ID }} --secret ${{ secrets.CLOUDFLARED_CLIENT_SECRET }} --destination 127.0.0.1:22
+          EOF2
+
+      - name: Sync k3s bootstrap manifests and re-apply
+        run: |
+          ssh vps "mkdir -p /home/admin/k3s-bootstrap"
+          rsync -az --delete --no-times --no-perms k3s/ vps:/home/admin/k3s-bootstrap/
+          # traefik-config.yaml / alloy-logging.yaml / local-path-retain-storageclass.yaml は
+          # k3sが自動適用する /var/lib/rancher/k3s/server/manifests/ に置く必要があるため sudo が要る。
+          # install.sh自体は初回インストール時のみ実行するものなのでここでは呼ばない。
+          ssh vps "sudo install -d -m 0755 /var/lib/rancher/k3s/server/manifests && \
+            sudo install -m 0644 /home/admin/k3s-bootstrap/traefik-config.yaml /var/lib/rancher/k3s/server/manifests/traefik-config.yaml && \
+            sudo install -m 0644 /home/admin/k3s-bootstrap/alloy-logging.yaml /var/lib/rancher/k3s/server/manifests/alloy-logging.yaml && \
+            sudo install -m 0644 /home/admin/k3s-bootstrap/local-path-retain-storageclass.yaml /var/lib/rancher/k3s/server/manifests/local-path-retain-storageclass.yaml"
+
+      - name: Sync shared k8s manifests and apply
+        run: |
+          ssh vps "mkdir -p /home/admin/k8s-shared"
+          rsync -az --delete --no-times --no-perms k8s/ vps:/home/admin/k8s-shared/
+          ssh vps "kubectl apply -k /home/admin/k8s-shared/overlays/shared"
+
+          ssh vps "kubectl -n network rollout status deployment/cloudflared --timeout=120s"
+          ssh vps "kubectl -n monitoring rollout status deployment/loki --timeout=120s"
+          ssh vps "kubectl -n monitoring rollout status deployment/grafana --timeout=120s"
+          ssh vps "kubectl -n monitoring rollout status deployment/prometheus --timeout=120s"
+          ssh vps "kubectl -n infisical rollout status deployment/backend --timeout=180s"
+          ssh vps "kubectl -n web-static rollout status deployment/www-archive --timeout=120s"
+          ssh vps "kubectl -n web-static rollout status deployment/storybook --timeout=120s"

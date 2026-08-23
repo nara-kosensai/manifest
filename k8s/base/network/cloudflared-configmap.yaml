@@ -1,0 +1,35 @@
+# 公開Web用の新規Cloudflare Tunnel(既存のSSH管理用Cloudflare Accessトンネルとは
+# 別物、そちらは触らない)のingressルール。全ホストを一旦 k3s同梱Traefikの
+# ClusterIP Service (kube-system/traefik) に転送し、その先のホスト単位の
+# 実際のルーティングは各namespaceのTraefik IngressRoute(base/ingress, overlays/*/ingress)
+# が担う。
+#
+# Tunnel本体の作成(`cloudflared tunnel create` および各ホスト名のDNS route)は
+# 一度きりの手動/CLI操作であり、ここでのコード管理対象外
+# (作成すると得られるcredentials.jsonはSecretとして別途投入する)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+data:
+  config.yaml: |
+    tunnel: nara-kosensai-web
+    credentials-file: /etc/cloudflared/creds/credentials.json
+    ingress:
+      - hostname: nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: www.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: test.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: storybook.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: pgadmin.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: pgadmin-test.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: grafana.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: infisical.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+      - service: http_status:404
