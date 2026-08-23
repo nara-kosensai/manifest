@@ -74,10 +74,16 @@ config/
 
 コードで完全に再現できない箇所(秘密情報の性質、または初回のみの操作):
 
-1. **VPSにk3sをインストール**: `k3s/install.sh` をVPS上でroot権限で実行。
-   実行後 `traefik-config.yaml` / `alloy-logging.yaml` / `local-path-retain-storageclass.yaml`
-   を `/var/lib/rancher/k3s/server/manifests/` に配置する(以後の変更は`config`のCIが
-   sudo経由で再配置する)。
+1. **VPSにk3sをインストール**: `k3s/install.sh` をVPS上で実行する(root権限が
+   必要だが、非rootで呼んでもスクリプト自身が自動的に`sudo`へ昇格する)。
+   ```
+   ./k3s/install.sh
+   ```
+   k3s本体のインストールに加えて、`traefik-config.yaml` / `alloy-logging.yaml` /
+   `local-path-retain-storageclass.yaml` を `/var/lib/rancher/k3s/server/manifests/`
+   に配置するところまでこのスクリプトが自動で行う(追加のコマンドは不要)。
+   以後これらのファイルを更新した場合は、`config`リポジトリへのpushでCIが
+   sudo経由で再配置する(`.github/workflows/deploy.yml`)。
 2. **Cloudflare Tunnel(公開Web用)を新規作成**: 既存のSSH管理用Cloudflare Access
    トンネルとは別物。
    ```
