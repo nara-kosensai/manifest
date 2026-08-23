@@ -74,28 +74,34 @@ jobs:
             ProxyCommand /tmp/cloudflared/cloudflared access tcp --hostname ${{ secrets.SSH_HOST }} --id ${{ secrets.CLOUDFLARED_CLIENT_ID }} --secret ${{ secrets.CLOUDFLARED_CLIENT_SECRET }} --destination 127.0.0.1:22
           EOF2
 
+      # GitHub ActionsはVPSに `github` ユーザーとしてSSH接続するため、
+      # そのユーザー自身のホーム配下(/home/github)に配置する。`github`ユーザーは
+      # /var/lib/rancher/k3s/server/manifests/ への書き込みにパスワードなしsudoが必要
+      # (README.md 手順7)。kubectlは ~/.kube/config に依存せずKUBECONFIGを都度明示する。
       - name: Sync k3s bootstrap manifests and re-apply
         run: |
-          ssh vps "mkdir -p /home/admin/k3s-bootstrap"
-          rsync -az --delete --no-times --no-perms k3s/ vps:/home/admin/k3s-bootstrap/
+          ssh vps "mkdir -p /home/github/k3s-bootstrap"
+          rsync -az --delete --no-times --no-perms k3s/ vps:/home/github/k3s-bootstrap/
           # traefik-config.yaml / alloy-logging.yaml / local-path-retain-storageclass.yaml は
           # k3sが自動適用する /var/lib/rancher/k3s/server/manifests/ に置く必要があるため sudo が要る。
           # install.sh自体は初回インストール時のみ実行するものなのでここでは呼ばない。
           ssh vps "sudo install -d -m 0755 /var/lib/rancher/k3s/server/manifests && \
-            sudo install -m 0644 /home/admin/k3s-bootstrap/traefik-config.yaml /var/lib/rancher/k3s/server/manifests/traefik-config.yaml && \
-            sudo install -m 0644 /home/admin/k3s-bootstrap/alloy-logging.yaml /var/lib/rancher/k3s/server/manifests/alloy-logging.yaml && \
-            sudo install -m 0644 /home/admin/k3s-bootstrap/local-path-retain-storageclass.yaml /var/lib/rancher/k3s/server/manifests/local-path-retain-storageclass.yaml"
+            sudo install -m 0644 /home/github/k3s-bootstrap/traefik-config.yaml /var/lib/rancher/k3s/server/manifests/traefik-config.yaml && \
+            sudo install -m 0644 /home/github/k3s-bootstrap/alloy-logging.yaml /var/lib/rancher/k3s/server/manifests/alloy-logging.yaml && \
+            sudo install -m 0644 /home/github/k3s-bootstrap/local-path-retain-storageclass.yaml /var/lib/rancher/k3s/server/manifests/local-path-retain-storageclass.yaml"
 
       - name: Sync shared k8s manifests and apply
+        env:
+          KUBECTL: "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl"
         run: |
-          ssh vps "mkdir -p /home/admin/k8s-shared"
-          rsync -az --delete --no-times --no-perms k8s/ vps:/home/admin/k8s-shared/
-          ssh vps "kubectl apply -k /home/admin/k8s-shared/overlays/shared"
+          ssh vps "mkdir -p /home/github/k8s-shared"
+          rsync -az --delete --no-times --no-perms k8s/ vps:/home/github/k8s-shared/
+          ssh vps "$KUBECTL apply -k /home/github/k8s-shared/overlays/shared"
 
-          ssh vps "kubectl -n network rollout status deployment/cloudflared --timeout=120s"
-          ssh vps "kubectl -n monitoring rollout status deployment/loki --timeout=120s"
-          ssh vps "kubectl -n monitoring rollout status deployment/grafana --timeout=120s"
-          ssh vps "kubectl -n monitoring rollout status deployment/prometheus --timeout=120s"
-          ssh vps "kubectl -n infisical rollout status deployment/backend --timeout=180s"
-          ssh vps "kubectl -n web-static rollout status deployment/www-archive --timeout=120s"
-          ssh vps "kubectl -n web-static rollout status deployment/storybook --timeout=120s"
+          ssh vps "$KUBECTL -n network rollout status deployment/cloudflared --timeout=120s"
+          ssh vps "$KUBECTL -n monitoring rollout status deployment/loki --timeout=120s"
+          ssh vps "$KUBECTL -n monitoring rollout status deployment/grafana --timeout=120s"
+          ssh vps "$KUBECTL -n monitoring rollout status deployment/prometheus --timeout=120s"
+          ssh vps "$KUBECTL -n infisical rollout status deployment/backend --timeout=180s"
+          ssh vps "$KUBECTL -n web-static rollout status deployment/www-archive --timeout=120s"
+          ssh vps "$KUBECTL -n web-static rollout status deployment/storybook --timeout=120s"

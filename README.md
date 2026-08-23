@@ -131,8 +131,10 @@ config/
 7. **`config`リポジトリのGitHub Actions環境(`production-vps`)にSSH関連シークレットを設定**:
    `SSH_PRIVATE_KEY` / `SSH_USER` / `SSH_HOST` / `CLOUDFLARED_CLIENT_ID` /
    `CLOUDFLARED_CLIENT_SECRET`(値は2026kosensaiリポジトリのものと同じでよい、
-   SSH管理用Cloudflare Accessトンネル経由でVPSに入るため)。加えてSSHユーザーが
-   `/var/lib/rancher/k3s/server/manifests/` へのパスワードなし`sudo`を実行できること。
+   SSH管理用Cloudflare Accessトンネル経由でVPSに入るため)。**`SSH_USER`はVPS上のCI専用
+   アカウント(例: `github`)を指し、対話ログインで使う`admin`アカウントとは別物**。この
+   `SSH_USER`のホームディレクトリ(`/home/<SSH_USER>`)には自由に書き込めること、また
+   `/var/lib/rancher/k3s/server/manifests/` へのパスワードなし`sudo`を実行できることが必要。
 8. **2026kosensaiリポジトリのInfisical(production/staging両環境)に `GHCR_PULL_TOKEN`
    (read:packages スコープのPAT)を追加**(prod/test namespace用のimagePullSecret)。
 
