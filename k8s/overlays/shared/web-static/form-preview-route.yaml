@@ -7,7 +7,7 @@ spec:
     - web
   routes:
     - kind: Rule
-      match: Host(`k3s-vm-05.nara-kosensai.com`)
+      match: Host(`info-check.nara-kosensai.com`)
       middlewares:
         - name: security-headers
       services:
