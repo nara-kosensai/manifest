@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production-vps
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -57,6 +59,7 @@ jobs:
           echo "${expected_hash}  /tmp/cloudflared/cloudflared" | sha256sum -c -
 
           chmod +x /tmp/cloudflared/cloudflared
+          /tmp/cloudflared/cloudflared --version
 
       - name: Set up SSH and Cloudflare Tunnel Config
         run: |
@@ -105,3 +108,4 @@ jobs:
           ssh vps "$KUBECTL -n infisical rollout status deployment/backend --timeout=180s"
           ssh vps "$KUBECTL -n web-static rollout status deployment/www-archive --timeout=120s"
           ssh vps "$KUBECTL -n web-static rollout status deployment/storybook --timeout=120s"
+          
