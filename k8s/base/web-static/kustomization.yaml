@@ -6,9 +6,13 @@ resources:
   - archive-service.yaml
   - storybook-deployment.yaml
   - storybook-service.yaml
+  - form-preview-deployment.yaml
+  - form-preview-service.yaml
 
 images:
   - name: ghcr.io/nara-kosensai/www-archive
     newTag: latest
   - name: ghcr.io/fumikun/2026kosensai-storybook
+    newTag: latest
+  - name: ghcr.io/fumikun/kosensai-form-preview
     newTag: latest
