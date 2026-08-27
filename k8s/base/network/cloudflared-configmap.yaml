@@ -24,6 +24,8 @@ data:
         service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: storybook.nara-kosensai.com
         service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: info-check.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: pgadmin.nara-kosensai.com
         service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: pgadmin-test.nara-kosensai.com
