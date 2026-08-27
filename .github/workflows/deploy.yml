@@ -110,5 +110,10 @@ jobs:
           ssh vps "$KUBECTL -n infisical rollout status deployment/backend --timeout=180s"
           ssh vps "$KUBECTL -n web-static rollout status deployment/www-archive --timeout=120s"
           ssh vps "$KUBECTL -n web-static rollout status deployment/storybook --timeout=120s"
-          ssh vps "$KUBECTL -n web-static rollout status deployment/form-preview --timeout=120s"
+          ssh vps "$KUBECTL -n web-static rollout restart deployment/form-preview"
+          ssh vps "$KUBECTL -n web-static rollout status deployment/form-preview --timeout=120s" || {
+            echo "::error::form-preview rollout failed, dumping pod description:"
+            ssh vps "$KUBECTL -n web-static describe pod -l app=form-preview"
+            exit 1
+          }
           
