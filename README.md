@@ -12,7 +12,7 @@ VPSネイティブのnginx + 複数docker-compose(このリポジトリの `ngin
 
 | リポジトリ | 内容 |
 | --- | --- |
-| `config`(このリポジトリ) | クラスタブートストラップ(`k3s/`)、特定サービスに紐づかない共有プラットフォーム設定(`k8s/`: cloudflared, Grafana/Loki/Prometheus, Infisical, 過去年度アーカイブ, storybook)、この手順書 |
+| `config`(このリポジトリ) | クラスタブートストラップ(`k3s/`)、特定サービスに紐づかない共有プラットフォーム設定(`k8s/`: cloudflared, Grafana/Loki/Prometheus, Infisical, 過去年度アーカイブ, storybook, kosensai-form-preview)、この手順書 |
 | `2026kosensai` | アプリ本体(backend/frontend/db/pgadmin/website)のDockerfile・k8sマニフェスト(`infra/k8s/base/app`, `overlays/{prod,test}`)・CI/CD |
 | `www` | 過去年度アーカイブの中身と、そのイメージをビルドするDockerfile/CI(デプロイ先マニフェストはこのリポジトリの`k8s/base/web-static`) |
 
@@ -40,7 +40,7 @@ config/
   直接参照する。このクラスタは単一テナント運用のため、Traefikの
   `providers.kubernetesCRD.allowCrossNamespace: true`(`k3s/traefik-config.yaml`)を
   有効にしている(namespace分離バイパス系の脆弱性はマルチテナント環境でのみ意味を持つ)。
-- `k8s/base/web-static/` — 過去年度アーカイブ(`www-archive`)+ storybook。
+- `k8s/base/web-static/` — 過去年度アーカイブ(`www-archive`) + storybook + form-preview。
 - `k8s/base/network/` — cloudflared(公開Web用トンネル)。
 - `k8s/base/monitoring/` — Loki, Grafana, Prometheus, node-exporter。
 - `k8s/base/infisical/` — Infisical本体(backend/redis/db)。
@@ -51,7 +51,7 @@ config/
 | namespace | 内容 | 管理元 |
 | --- | --- | --- |
 | `prod` / `test` | 2026kosensaiアプリ本体 | `2026kosensai`リポジトリのCI |
-| `web-static` | 過去年度アーカイブ, storybook(singleton) | `config`のCI |
+| `web-static` | 過去年度アーカイブ, storybook, form-preview(singleton) | `config`のCI |
 | `network` | cloudflared(singleton) | `config`のCI |
 | `monitoring` | Loki, Grafana, Prometheus, node-exporter | `config`のCI |
 | `infisical` | Infisical本体 | `config`のCI |
@@ -99,6 +99,7 @@ config/
    cloudflared tunnel route dns nara-kosensai-web pgadmin-test.nara-kosensai.com
    cloudflared tunnel route dns nara-kosensai-web grafana.nara-kosensai.com
    cloudflared tunnel route dns nara-kosensai-web infisical.nara-kosensai.com
+   cloudflared tunnel route dns nara-kosensai-web info-check.nara-kosensai.com
    ```
    生成される `credentials.json` を、VPS上で直接k8s Secretとして投入する
    (Infisical自身がまだ動いていないため、Infisicalを経由できない):

@@ -101,6 +101,8 @@ jobs:
           rsync -az --delete --no-times --no-perms k8s/ vps:/home/github/k8s-shared/
           ssh vps "$KUBECTL apply -k /home/github/k8s-shared/overlays/shared"
 
+          # ConfigMapの更新をPodに反映させるためcloudflaredをローリング再起動する
+          ssh vps "$KUBECTL -n network rollout restart deployment/cloudflared"
           ssh vps "$KUBECTL -n network rollout status deployment/cloudflared --timeout=120s"
           ssh vps "$KUBECTL -n monitoring rollout status deployment/loki --timeout=120s"
           ssh vps "$KUBECTL -n monitoring rollout status deployment/grafana --timeout=120s"
@@ -108,4 +110,5 @@ jobs:
           ssh vps "$KUBECTL -n infisical rollout status deployment/backend --timeout=180s"
           ssh vps "$KUBECTL -n web-static rollout status deployment/www-archive --timeout=120s"
           ssh vps "$KUBECTL -n web-static rollout status deployment/storybook --timeout=120s"
+          ssh vps "$KUBECTL -n web-static rollout status deployment/form-preview --timeout=120s"
           

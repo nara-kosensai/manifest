@@ -14,3 +14,5 @@ images:
     newTag: latest
   - name: ghcr.io/fumikun/2026kosensai-storybook
     newTag: latest
+  - name: ghcr.io/fumikun/kosensai-form-preview
+    newTag: latest
