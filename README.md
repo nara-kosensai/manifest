@@ -1,7 +1,7 @@
 # nara-kosensai k3s移行 手順書
 
 VPSネイティブのnginx + 複数docker-compose(このリポジトリの `nginx.conf` /
-`default.conf` / `grafana/` / `infisical/` が旧構成)で運用していたシステムを、
+`default.conf` / `grafana/` が旧構成)で運用していたシステムを、
 同一VPS上のシングルノードk3sに全面移行する。外部通信は原則Cloudflare Tunnel経由のみとし、
 クラスタはノードの公開インターフェースに極力ポートをバインドしない
 (唯一の例外が本番アプリ向けのOrigin Authentication、詳細は後述)。
@@ -13,7 +13,7 @@ VPSネイティブのnginx + 複数docker-compose(このリポジトリの `ngin
 
 | リポジトリ | 内容 |
 | --- | --- |
-| `config`(このリポジトリ) | クラスタブートストラップ(`k3s/`)、特定サービスに紐づかない共有プラットフォーム設定(`k8s/`: cloudflared, Grafana/Loki/Prometheus, Infisical, 過去年度アーカイブ, storybook, kosensai-form-preview)、この手順書 |
+| `config`(このリポジトリ) | クラスタブートストラップ(`k3s/`)、特定サービスに紐づかない共有プラットフォーム設定(`k8s/`: cloudflared, Grafana/Loki/Prometheus, 過去年度アーカイブ, storybook, kosensai-form-preview)、この手順書 |
 | `2026kosensai` | アプリ本体(backend/frontend/db/pgadmin/website)のDockerfile・k8sマニフェスト(`infra/k8s/base/app`, `overlays/{prod,test}`)・CI/CD |
 | `www` | 過去年度アーカイブの中身と、そのイメージをビルドするDockerfile/CI(デプロイ先マニフェストはこのリポジトリの`k8s/base/web-static`) |
 
@@ -28,7 +28,9 @@ VPSネイティブのnginx + 複数docker-compose(このリポジトリの `ngin
 config/
   k3s/    # クラスタ自体のブートストラップ(k3sインストール時に1回、以後は変更時のみ再適用)
   k8s/    # 共有プラットフォームのマニフェスト(Kustomize、configのCIが継続的にapply)
-  nginx.conf, default.conf, grafana/, infisical/   # 旧構成(退役、下記の対応表を参照)
+  nginx.conf, default.conf, grafana/, infisical/   # 旧構成(退役、下記の対応表を参照。
+                                                    # infisical/はInfisical自体を
+                                                    # 廃止したため参考資料としてのみ残る)
 ```
 
 - `k3s/install.sh` — k3sインストール(`--disable=servicelb`)。
@@ -44,7 +46,6 @@ config/
 - `k8s/base/web-static/` — 過去年度アーカイブ(`www-archive`) + storybook + form-preview。
 - `k8s/base/network/` — cloudflared(公開Web用トンネル)。
 - `k8s/base/monitoring/` — Loki, Grafana, Prometheus, node-exporter。
-- `k8s/base/infisical/` — Infisical本体(backend/redis/db)。
 - `k8s/overlays/shared/` — 上記すべてを対応するnamespaceにまとめて適用する。
 
 ## namespace
@@ -55,8 +56,13 @@ config/
 | `web-static` | 過去年度アーカイブ, storybook, form-preview(singleton) | `config`のCI |
 | `network` | cloudflared(singleton) | `config`のCI |
 | `monitoring` | Loki, Grafana, Prometheus, node-exporter | `config`のCI |
-| `infisical` | Infisical本体 | `config`のCI |
 | `kube-system` | k3s同梱Traefik(ClusterIPのみ、公開ポートなし) | `k3s/`ブートストラップ |
+
+過去にInfisicalを`infisical` namespaceで運用していたが廃止した(秘密情報は
+下記の通り`app-env`のgitコミットとGitHub Secretsに移行した)。VPS上に
+namespaceが残っている場合は手動で削除が必要
+(`kubectl delete namespace infisical` — Infisical自身のPostgres/Redisの
+データも消えるため、必要な情報がないか確認してから実行すること)。
 
 ## app-env(2026kosensaiアプリの環境変数)
 
@@ -84,9 +90,8 @@ config/
 `nara-kosensai.com` / `www.nara-kosensai.com`(2026kosensaiリポジトリの`prod`
 namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
 **Origin Authentication(Authenticated Origin Pulls, mTLS)** で直接オリジンに
-到達させる。`test.nara-kosensai.com`および`storybook`/`grafana`/`infisical`/
-`pgadmin*`/`info-check`は従来通りTunnel経由(pgadminはCloudflare Accessでの
-認証も継続)。
+到達させる。`test.nara-kosensai.com`および`storybook`/`grafana`/`pgadmin*`/
+`info-check`は従来通りTunnel経由(pgadminはCloudflare Accessでの認証も継続)。
 
 ### 仕組み
 
@@ -105,7 +110,7 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
   が `websecure-mtls` エントリーポイントとこの`TLSOption`を参照し
   (namespace跨ぎ参照。`allowCrossNamespace: true`で許可済み)、Cloudflareが
   発行したOrigin CA証明書(オリジンサーバ側のTLS証明書、`prod` namespaceの
-  Secret、Infisical経由でCIが投入)をサーバ証明書として使う。
+  Secret、GitHub Environment Secret経由でCIが投入)をサーバ証明書として使う。
 - `test`やその他のIngressRouteは`web`エントリーポイントのみを使うため、
   `websecure-mtls`(443番)からは物理的にルーティングされない
   (Traefikはエントリーポイント単位でルーターをbindするため)。
@@ -116,8 +121,7 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
    (`nara-kosensai.com`, `www.nara-kosensai.com`をカバー)を発行し、
    cert/keyを2026kosensaiリポジトリの`production-vps` environmentの
    GitHub Environment Secretに `CF_ORIGIN_CERT` / `CF_ORIGIN_KEY` として登録する
-   (Infisicalは経由しない。prod専用の機微情報のためrepository全体のSecretではなく
-   environment scopeにする)。
+   (prod専用の機微情報のためrepository全体のSecretではなくenvironment scopeにする)。
 2. `SSL/TLS > Origin Server > Authenticated Origin Pulls` を有効化
    (zone-level。Freeプランのためper-hostnameのカスタムクライアント証明書は
    使えないが、zone-levelのCloudflare管理証明書で十分)。
@@ -152,7 +156,7 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
 | storybookサーバブロック | `k8s/overlays/shared/web-static/storybook-route.yaml` |
 | `:8080 /metrics` (nginx stub_status) | Traefikの標準Prometheusメトリクス |
 | `grafana/docker-compose.yml`(Loki, Grafana, Prometheus, node-exporter, promtail, nginx-exporter) | `k8s/base/monitoring/*`。**promtailとnginx-exporterはnginx retireに伴い廃止**(promtailの役割はGrafana Alloyに、nginx-exporterの役割はTraefikネイティブメトリクスに統合) |
-| `infisical/docker-compose.prod.yml` | `k8s/base/infisical/*` |
+| `infisical/docker-compose.prod.yml` | 廃止(下記「app-env」節の通り、秘密情報はgitコミットとGitHub Secretsに移行) |
 
 ## 一度きりの手動ブートストラップ手順
 
@@ -179,11 +183,9 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
    cloudflared tunnel route dns nara-kosensai-web pgadmin.nara-kosensai.com
    cloudflared tunnel route dns nara-kosensai-web pgadmin-test.nara-kosensai.com
    cloudflared tunnel route dns nara-kosensai-web grafana.nara-kosensai.com
-   cloudflared tunnel route dns nara-kosensai-web infisical.nara-kosensai.com
    cloudflared tunnel route dns nara-kosensai-web info-check.nara-kosensai.com
    ```
-   生成される `credentials.json` を、VPS上で直接k8s Secretとして投入する
-   (Infisical自身がまだ動いていないため、Infisicalを経由できない):
+   生成される `credentials.json` を、VPS上で直接k8s Secretとして投入する:
    ```
    kubectl create namespace network
    kubectl -n network create secret generic cloudflared-credentials \
@@ -191,14 +193,7 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
    ```
 3. **pgAdmin用Cloudflare Accessポリシー**: `pgadmin*.nara-kosensai.com` に対して
    Cloudflareダッシュボード側でAccessアプリケーション(認証ポリシー)を設定する。
-4. **Infisical自身の秘密情報を投入**(循環依存のため、Infisical経由では取得できない。
-   このリポジトリにrsyncされている `infisical/.env` の内容を使う。**このファイルは
-   `.gitignore`済みでコミットしない**):
-   ```
-   kubectl create namespace infisical
-   kubectl -n infisical create secret generic infisical-env --from-env-file=infisical/.env
-   ```
-5. **Grafanaの秘密情報を投入**(`grafana/docker-compose.yml` は `.gitignore`済み、
+4. **Grafanaの秘密情報を投入**(`grafana/docker-compose.yml` は `.gitignore`済み、
    埋め込まれていた `GF_SECURITY_ADMIN_PASSWORD` と `GF_AUTH_GITHUB_CLIENT_SECRET` を使う):
    ```
    kubectl create namespace monitoring
@@ -206,22 +201,23 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
      --from-literal=admin-password='<GF_SECURITY_ADMIN_PASSWORD>' \
      --from-literal=github-client-secret='<GF_AUTH_GITHUB_CLIENT_SECRET>'
    ```
-6. **GHCR pull用PAT**(`web-static` namespaceのwww-archive/storybookイメージがPrivateなため):
+5. **GHCR pull用PAT**(`web-static` namespaceのwww-archive/storybookイメージがPrivateなため):
    ```
    kubectl create namespace web-static
    kubectl -n web-static create secret docker-registry ghcr-pull \
      --docker-server=ghcr.io --docker-username=<github-username> \
      --docker-password=<read:packages スコープのPAT>
    ```
-7. **`config`リポジトリのGitHub Actions環境(`production-vps`)にSSH関連シークレットを設定**:
+6. **`config`リポジトリのGitHub Actions環境(`production-vps`)にSSH関連シークレットを設定**:
    `SSH_PRIVATE_KEY` / `SSH_USER` / `SSH_HOST` / `CLOUDFLARED_CLIENT_ID` /
    `CLOUDFLARED_CLIENT_SECRET`(値は2026kosensaiリポジトリのものと同じでよい、
    SSH管理用Cloudflare Accessトンネル経由でVPSに入るため)。**`SSH_USER`はVPS上のCI専用
    アカウント(例: `github`)を指し、対話ログインで使う`admin`アカウントとは別物**。この
    `SSH_USER`のホームディレクトリ(`/home/<SSH_USER>`)には自由に書き込めること、また
    `/var/lib/rancher/k3s/server/manifests/` へのパスワードなし`sudo`を実行できることが必要。
-8. **2026kosensaiリポジトリのInfisical(production/staging両環境)に `GHCR_PULL_TOKEN`
-   (read:packages スコープのPAT)を追加**(prod/test namespace用のimagePullSecret)。
+7. **2026kosensaiリポジトリの`production-vps`/`test-vps` environmentに
+   `GHCR_PULL_TOKEN`(read:packages スコープのPAT)をGitHub Environment Secretとして
+   追加**(prod/test namespace用のimagePullSecret。Infisicalは経由しない)。
 
 これ以降、共有プラットフォーム設定は `config` への push (`main`ブランチ) で、
 アプリ本体は `2026kosensai` の `prod`/`test` ブランチへのpushで、それぞれ独立に
@@ -237,8 +233,8 @@ kubectl apply --dry-run=server -k k8s/overlays/shared
 適用後:
 - `kubectl get svc -n kube-system traefik` で `TYPE=ClusterIP` になっていること
   (公開ポートを一切bindしていないこと)。
-- `curl -I https://grafana.nara-kosensai.com/`, `https://infisical.nara-kosensai.com/`,
-  `https://storybook.nara-kosensai.com/` が200/302で応答すること。
+- `curl -I https://grafana.nara-kosensai.com/`, `https://storybook.nara-kosensai.com/`
+  が200/302で応答すること。
 - GrafanaでLoki/Prometheusのデータソードが有効で、各namespaceのPodログ・
   node-exporter/Traefikメトリクスが見えること。
 - `nft list table ip cloudflare_mtls` / `nft list table ip6 cloudflare_mtls6`

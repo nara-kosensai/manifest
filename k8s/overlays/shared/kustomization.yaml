@@ -7,7 +7,6 @@ resources:
   - web-static
   - network
   - monitoring
-  - infisical
 
 images:
   - name: ghcr.io/nara-kosensai/www-archive

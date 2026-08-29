@@ -1,13 +1,12 @@
 name: Deploy shared platform config to k3s
 
 # ここでデプロイするのは特定サービスに紐づかない共有プラットフォーム設定
-# (cloudflared, Grafana/Loki/Prometheus, Infisical, 過去年度アーカイブ, storybook)。
+# (cloudflared, Grafana/Loki/Prometheus, 過去年度アーカイブ, storybook)。
 # アプリ本体(backend/frontend/db/pgadmin/website)は 2026kosensai リポジトリが
 # 自身のCIで独立にデプロイする。
 #
-# 秘密情報(grafana-secrets, infisical-env, cloudflared-credentials, web-static用
-# ghcr-pull)はこのワークフローでは一切扱わない。README.mdの手順で一度きり手動投入する
-# (infisical-envはInfisical自身の秘密情報のため、Infisical経由での取得が循環依存になる)。
+# 秘密情報(grafana-secrets, cloudflared-credentials, web-static用ghcr-pull)は
+# このワークフローでは一切扱わない。README.mdの手順で一度きり手動投入する。
 on:
   push:
     branches: [main]
@@ -131,7 +130,6 @@ jobs:
           ssh vps "$KUBECTL -n monitoring rollout status deployment/loki --timeout=120s"
           ssh vps "$KUBECTL -n monitoring rollout status deployment/grafana --timeout=120s"
           ssh vps "$KUBECTL -n monitoring rollout status deployment/prometheus --timeout=120s"
-          ssh vps "$KUBECTL -n infisical rollout status deployment/backend --timeout=180s"
           ssh vps "$KUBECTL -n web-static rollout status deployment/www-archive --timeout=120s"
           ssh vps "$KUBECTL -n web-static rollout status deployment/storybook --timeout=120s"
           ssh vps "$KUBECTL -n web-static rollout restart deployment/form-preview"

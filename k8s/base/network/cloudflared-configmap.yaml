@@ -32,6 +32,4 @@ data:
         service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: grafana.nara-kosensai.com
         service: http://traefik.kube-system.svc.cluster.local:80
-      - hostname: infisical.nara-kosensai.com
-        service: http://traefik.kube-system.svc.cluster.local:80
       - service: http_status:404
