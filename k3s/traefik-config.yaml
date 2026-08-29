@@ -9,10 +9,14 @@
 # CloudflareのOrigin Authentication(Authenticated Origin Pulls, mTLS)を使い
 # Tunnelを経由せず直接オリジンへ到達させる構成にしている。このためだけに
 # `websecure-mtls` エントリーポイントを追加し、コンテナの8444番ポートを
-# ノードの公開インターフェースの443番に `hostPort` で直接バインドする
-# (コンテナポートをTraefik Helmチャートのデフォルト`websecure`エントリーポイントが
-# 既に使っている8443番と衝突しないよう8444番にしている。Service自体は
-# ClusterIPのままなので、80番(`web`, Tunnel専用)は引き続き非公開)。
+# ノードの公開インターフェースの443番に `hostPort` で直接バインドする。
+# コンテナポートはTraefik Helmチャートのデフォルト`websecure`エントリーポイントが
+# 既に使っている8443番と衝突しないよう8444番にしている。さらに`expose.default: false`
+# にしてService(ClusterIP)には一切公開しない: hostPortはkubeletがノードの
+# インターフェースに直接bindする仕組みでService/kube-proxyを経由しないため、
+# Service側に443番ポートを追加する必要がない。むしろ追加すると`websecure`の
+# デフォルト`exposedPort: 443`と重複しHelmのインストールが失敗する
+# (実際に起きた障害: `.spec.ports: duplicate entries for key [port=443,protocol="TCP"]`)。
 # test/storybook/grafana/pgadmin等はこれまで通り`web`エントリーポイントのみを
 # 使いTunnel経由とする(このエントリーポイントにIngressRouteをbindしなければ、
 # 443番からは絶対に到達できない)。
@@ -39,8 +43,7 @@ spec:
         port: 8444
         hostPort: 443
         expose:
-          default: true
-        exposedPort: 443
+          default: false
         protocol: TCP
         tls:
           enabled: true

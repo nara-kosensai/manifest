@@ -98,8 +98,10 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
 - `k3s/traefik-config.yaml` に `websecure-mtls` エントリーポイントを追加し、
   コンテナの8444番(デフォルトの`websecure`エントリーポイントが使う8443番との
   衝突を避けるため)を `hostPort: 443` でノードの公開インターフェースに直接bind
-  している(Serviceは引き続きClusterIPなので、Tunnel専用の`web`(80番)は
-  非公開のまま)。
+  している。`expose.default: false` にしてService(ClusterIP)には追加しない
+  (hostPortはkube-proxyを経由しないため不要。追加すると`websecure`の
+  デフォルトの443番公開と重複しHelmインストールが失敗する)。Service自体は
+  引き続きClusterIPなので、Tunnel専用の`web`(80番)は非公開のまま。
 - `k8s/base/network/cloudflare-aop-ca.yaml` に、Cloudflareが公開している
   Authenticated Origin Pulls用CA証明書
   (`https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem`)
