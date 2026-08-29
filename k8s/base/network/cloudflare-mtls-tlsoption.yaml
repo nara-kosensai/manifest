@@ -1,0 +1,17 @@
+# 本番アプリ(nara-kosensai.com / www.nara-kosensai.com)向けのmTLS検証設定。
+# websecure-mtlsエントリーポイント(traefik-config.yamlでhostPort:443を割り当て)
+# を使うIngressRouteだけがこれを参照し、Cloudflareのクライアント証明書
+# (cloudflare-aop-ca.yamlのCAで検証)を要求する。
+#
+# 参照側(2026kosensaiリポジトリのprod IngressRoute)はcross-namespace(prod→network)
+# になるが、k3s/traefik-config.yamlで providers.kubernetesCRD.allowCrossNamespace: true
+# にしているため問題ない。
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: cloudflare-mtls
+spec:
+  clientAuth:
+    secretNames:
+      - cloudflare-aop-ca
+    clientAuthType: RequireAndVerifyClientCert

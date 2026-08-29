@@ -2,8 +2,9 @@
 
 VPSネイティブのnginx + 複数docker-compose(このリポジトリの `nginx.conf` /
 `default.conf` / `grafana/` / `infisical/` が旧構成)で運用していたシステムを、
-同一VPS上のシングルノードk3sに全面移行する。外部通信はCloudflare Tunnel経由のみとし、
-クラスタはノードの公開インターフェースに一切ポートをバインドしない。
+同一VPS上のシングルノードk3sに全面移行する。外部通信は原則Cloudflare Tunnel経由のみとし、
+クラスタはノードの公開インターフェースに極力ポートをバインドしない
+(唯一の例外が本番アプリ向けのOrigin Authentication、詳細は後述)。
 
 ## リポジトリの役割分担
 
@@ -56,6 +57,86 @@ config/
 | `monitoring` | Loki, Grafana, Prometheus, node-exporter | `config`のCI |
 | `infisical` | Infisical本体 | `config`のCI |
 | `kube-system` | k3s同梱Traefik(ClusterIPのみ、公開ポートなし) | `k3s/`ブートストラップ |
+
+## app-env(2026kosensaiアプリの環境変数)
+
+`prod.env` / `staging.env` / `dev.env` / `backend-dev.env` は2026kosensaiアプリ
+(backend/frontend/website/pgadmin)の環境変数。Infisicalは経由せずこのリポジトリで
+直接管理する(DBはk8s ClusterIP内に閉じており外部到達不能なため、平文コミットを
+許容する判断)。
+
+| ファイル | 用途 |
+| --- | --- |
+| `prod.env` | `2026kosensai`の`prod` namespace(`app-env` Secret) |
+| `staging.env` | `2026kosensai`の`test` namespace(`app-env` Secret) |
+| `dev.env` / `backend-dev.env` | ローカル開発用(docker-compose等)。VPSには同期しない |
+
+このリポジトリのCI(`deploy.yml`)が`prod.env`/`staging.env`をVPSの
+`/home/github/app-env/{prod,staging}.env`に同期し、2026kosensaiリポジトリの
+`deploy-prod.yml`/`deploy-test.yml`がそのパスを直接`--from-env-file`で使う
+(2026kosensai側のCIより先に、このリポジトリのCIが一度動いている必要がある)。
+
+`CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`はここには含めない
+(GitHub Actions Secretとして2026kosensai側で別途管理)。
+
+## Origin Authentication (mTLS) — 本番アプリのみ
+
+`nara-kosensai.com` / `www.nara-kosensai.com`(2026kosensaiリポジトリの`prod`
+namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
+**Origin Authentication(Authenticated Origin Pulls, mTLS)** で直接オリジンに
+到達させる。`test.nara-kosensai.com`および`storybook`/`grafana`/`infisical`/
+`pgadmin*`/`info-check`は従来通りTunnel経由(pgadminはCloudflare Accessでの
+認証も継続)。
+
+### 仕組み
+
+- `k3s/traefik-config.yaml` に `websecure-mtls` エントリーポイントを追加し、
+  コンテナの8443番を `hostPort: 443` でノードの公開インターフェースに直接bind
+  している(Serviceは引き続きClusterIPなので、Tunnel専用の`web`(80番)は
+  非公開のまま)。
+- `k8s/base/network/cloudflare-aop-ca.yaml` に、Cloudflareが公開している
+  Authenticated Origin Pulls用CA証明書
+  (`https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem`)
+  を配置(秘密情報ではないためgit管理)。
+- `k8s/base/network/cloudflare-mtls-tlsoption.yaml`(Traefik `TLSOption` CRD)が
+  そのCAでCloudflareからのクライアント証明書を検証する
+  (`clientAuthType: RequireAndVerifyClientCert`)。
+- 2026kosensaiリポジトリの `infra/k8s/overlays/prod/ingress/ingressroute.yaml`
+  が `websecure-mtls` エントリーポイントとこの`TLSOption`を参照し
+  (namespace跨ぎ参照。`allowCrossNamespace: true`で許可済み)、Cloudflareが
+  発行したOrigin CA証明書(オリジンサーバ側のTLS証明書、`prod` namespaceの
+  Secret、Infisical経由でCIが投入)をサーバ証明書として使う。
+- `test`やその他のIngressRouteは`web`エントリーポイントのみを使うため、
+  `websecure-mtls`(443番)からは物理的にルーティングされない
+  (Traefikはエントリーポイント単位でルーターをbindするため)。
+
+### Cloudflareダッシュボード側の設定(一度きり、手動)
+
+1. `SSL/TLS > Origin Server > Create Certificate` でOrigin CA証明書
+   (`nara-kosensai.com`, `www.nara-kosensai.com`をカバー)を発行し、
+   cert/keyを2026kosensaiリポジトリの`production-vps` environmentの
+   GitHub Environment Secretに `CF_ORIGIN_CERT` / `CF_ORIGIN_KEY` として登録する
+   (Infisicalは経由しない。prod専用の機微情報のためrepository全体のSecretではなく
+   environment scopeにする)。
+2. `SSL/TLS > Origin Server > Authenticated Origin Pulls` を有効化
+   (zone-level。Freeプランのためper-hostnameのカスタムクライアント証明書は
+   使えないが、zone-levelのCloudflare管理証明書で十分)。
+3. `SSL/TLS > Overview` を `Full (strict)` に変更
+   (Tunnel経由のホストはこの設定と無関係に動作し続けるため影響なし)。
+4. `k3s/cloudflare-ip-allowlist.sh`(+ `.service`/`.timer`)が、443/tcp宛の
+   パケットをCloudflareの公開IPレンジ以外はnftablesのraw prerouting段階で
+   silent DROPする(TCP/TLSレベルで一切応答を返さない。mTLS検証はその内側の
+   保険という位置付け)。`install.sh`が初回導入・有効化し、以後は
+   `deploy.yml`が更新の都度再適用、systemd timerがIPレンジを日次で自動更新する。
+   既存のk3s/kube-proxyが使うnftables/iptablesルールには触れない専用テーブル
+   構成。**このスクリプトはnftablesを前提とする**(ufuやiptables-legacyのみの
+   環境では動作しない)。
+5. 動作確認後、`nara-kosensai.com` / `www.nara-kosensai.com` のDNSレコードを
+   Tunnel向けCNAME(`<tunnel-id>.cfargotunnel.com`)から、VPSの公開IPを指す
+   A(/AAAA)レコード(Proxied継続)に切り替える。
+6. 切り替え後、`k8s/base/network/cloudflared-configmap.yaml` の`ingress`から
+   `nara-kosensai.com` / `www.nara-kosensai.com` のエントリを削除してよい
+   (test/admin系は残す)。
 
 ## 旧nginx設定との対応関係
 
@@ -160,3 +241,7 @@ kubectl apply --dry-run=server -k k8s/overlays/shared
   `https://storybook.nara-kosensai.com/` が200/302で応答すること。
 - GrafanaでLoki/Prometheusのデータソードが有効で、各namespaceのPodログ・
   node-exporter/Traefikメトリクスが見えること。
+- `nft list table ip cloudflare_mtls` / `nft list table ip6 cloudflare_mtls6`
+  でCloudflareのIPレンジが入ったsetが存在すること。VPS外の任意のIPから
+  `curl -v https://<VPSの公開IP>:443 -H "Host: nara-kosensai.com"` を実行し、
+  TCP接続自体がタイムアウトする(応答が一切返らない)ことを確認する。

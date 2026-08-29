@@ -77,6 +77,17 @@ jobs:
             ProxyCommand /tmp/cloudflared/cloudflared access tcp --hostname ${{ secrets.SSH_HOST }} --id ${{ secrets.CLOUDFLARED_CLIENT_ID }} --secret ${{ secrets.CLOUDFLARED_CLIENT_SECRET }} --destination 127.0.0.1:22
           EOF2
 
+      # 2026kosensaiアプリの app-env Secret(DB/pgAdmin/CORS等)の元データ。
+      # Infisicalは使わず、このリポジトリにコミットされた prod.env / staging.env を
+      # そのままVPSに同期する(2026kosensaiリポジトリのdeploy-prod.yml/deploy-test.ymlが
+      # `--from-env-file` でこのパスを直接参照する)。dev.env / backend-dev.envは
+      # ローカル開発専用でVPSには同期しない。
+      - name: Sync app-env files for 2026kosensai
+        run: |
+          ssh vps "mkdir -p /home/github/app-env"
+          scp prod.env vps:/home/github/app-env/prod.env
+          scp staging.env vps:/home/github/app-env/staging.env
+
       # GitHub ActionsはVPSに `github` ユーザーとしてSSH接続するため、
       # そのユーザー自身のホーム配下(/home/github)に配置する。`github`ユーザーは
       # /var/lib/rancher/k3s/server/manifests/ への書き込みにパスワードなしsudoが必要
@@ -92,6 +103,19 @@ jobs:
             sudo install -m 0644 /home/github/k3s-bootstrap/traefik-config.yaml /var/lib/rancher/k3s/server/manifests/traefik-config.yaml && \
             sudo install -m 0644 /home/github/k3s-bootstrap/alloy-logging.yaml /var/lib/rancher/k3s/server/manifests/alloy-logging.yaml && \
             sudo install -m 0644 /home/github/k3s-bootstrap/local-path-retain-storageclass.yaml /var/lib/rancher/k3s/server/manifests/local-path-retain-storageclass.yaml"
+
+      # Cloudflare IP allowlist(443/tcp、Origin Authentication用)のスクリプト/
+      # systemd unitはk3sの自動適用manifestsディレクトリの対象外(host netnsの
+      # nftablesを直接操作するスクリプトのため)。更新の都度、再インストールして
+      # 即座に再実行する(IPレンジ自体はsystemd timerが日次で別途更新する)。
+      - name: Sync and re-run Cloudflare IP allowlist
+        run: |
+          ssh vps "sudo install -m 0755 /home/github/k3s-bootstrap/cloudflare-ip-allowlist.sh /usr/local/sbin/cloudflare-ip-allowlist.sh && \
+            sudo install -m 0644 /home/github/k3s-bootstrap/cloudflare-ip-allowlist.service /etc/systemd/system/cloudflare-ip-allowlist.service && \
+            sudo install -m 0644 /home/github/k3s-bootstrap/cloudflare-ip-allowlist.timer /etc/systemd/system/cloudflare-ip-allowlist.timer && \
+            sudo systemctl daemon-reload && \
+            sudo systemctl enable --now cloudflare-ip-allowlist.timer && \
+            sudo /usr/local/sbin/cloudflare-ip-allowlist.sh"
 
       - name: Sync shared k8s manifests and apply
         env:

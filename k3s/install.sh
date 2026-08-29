@@ -48,5 +48,14 @@ install -m 0644 "$(dirname "$0")/alloy-logging.yaml" /var/lib/rancher/k3s/server
 echo "Applying local-path-retain StorageClass (for data that must survive PVC/namespace deletion)..."
 install -m 0644 "$(dirname "$0")/local-path-retain-storageclass.yaml" /var/lib/rancher/k3s/server/manifests/local-path-retain-storageclass.yaml
 
+echo "Installing Cloudflare IP allowlist for 443/tcp (Origin Authentication, nftables raw-prerouting drop)..."
+install -m 0755 "$(dirname "$0")/cloudflare-ip-allowlist.sh" /usr/local/sbin/cloudflare-ip-allowlist.sh
+install -m 0644 "$(dirname "$0")/cloudflare-ip-allowlist.service" /etc/systemd/system/cloudflare-ip-allowlist.service
+install -m 0644 "$(dirname "$0")/cloudflare-ip-allowlist.timer" /etc/systemd/system/cloudflare-ip-allowlist.timer
+systemctl daemon-reload
+systemctl enable --now cloudflare-ip-allowlist.timer
+/usr/local/sbin/cloudflare-ip-allowlist.sh
+
 echo "Done. Verify with: kubectl get svc -n kube-system traefik"
 echo "It must show TYPE=ClusterIP (not LoadBalancer) with no host port bound."
+echo "Verify the Cloudflare IP allowlist with: nft list table ip cloudflare_mtls"

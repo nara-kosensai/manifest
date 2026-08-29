@@ -1,22 +1,28 @@
-# k3s に同梱される Traefik を、ノードの公開インターフェースにポートを
-# 一切バインドしない構成にする HelmChartConfig。
+# k3s に同梱される Traefik の設定用HelmChartConfig。
 #
-# 外部通信は Cloudflare Tunnel (cloudflared) 経由のみとし、cloudflared は
+# 外部通信は原則 Cloudflare Tunnel (cloudflared) 経由のみとし、cloudflared は
 # クラスタ内部から traefik.kube-system.svc.cluster.local:80 に到達できれば
-# 十分なため、Service を ClusterIP にする(LoadBalancer/NodePortにしない)。
+# 十分なため、Service は ClusterIP のまま(LoadBalancer/NodePortにしない)。
 # --disable=servicelb (install.sh) と合わせて二重に防止する。
+#
+# 唯一の例外が本番アプリ(nara-kosensai.com / www.nara-kosensai.com)で、
+# CloudflareのOrigin Authentication(Authenticated Origin Pulls, mTLS)を使い
+# Tunnelを経由せず直接オリジンへ到達させる構成にしている。このためだけに
+# `websecure-mtls` エントリーポイントを追加し、コンテナの8443番ポートを
+# ノードの公開インターフェースの443番に `hostPort` で直接バインドする
+# (Service自体はClusterIPのままなので、80番(`web`, Tunnel専用)は
+# 引き続き非公開)。test/storybook/grafana/infisical/pgadmin等はこれまで通り
+# `web` エントリーポイントのみを使いTunnel経由とする(このエントリーポイントに
+# IngressRouteをbindしなければ、443番からは絶対に到達できない)。
+# 経緯は nara-kosensai/config の README.md「Origin Authentication (mTLS)」の節を参照。
 #
 # k3s はこのファイルを /var/lib/rancher/k3s/server/manifests/ に置くと
 # 自動的に適用する(HelmChartConfig CRDはTraefikコントローラのHelmリリースを
 # 上書きするための k3s 独自のカスタムリソース)。
-# 効いているのは `service.type: ClusterIP` の1行のみ:LoadBalancer/NodePortでは
-# なくClusterIPにすることで、そもそもホストの物理ポートを一切bindしなくなる
-# (--disable=servicelbと合わせて二重に保証)。他の `ports.*` 系フィールドは
-# Traefik Helmチャートのバージョンによってスキーマが変わりやすいため、
-# ここでは触らずデフォルトのままにする。
 #
 # 適用後、必ず `kubectl get svc -n kube-system traefik` で
-# TYPE=ClusterIP になっていることを確認すること。
+# TYPE=ClusterIP になっていることを確認すること
+# (443番はService経由ではなくhostPortでのみ公開される)。
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:
@@ -26,6 +32,16 @@ spec:
   valuesContent: |-
     service:
       type: ClusterIP
+    ports:
+      websecure-mtls:
+        port: 8443
+        hostPort: 443
+        expose:
+          default: true
+        exposedPort: 443
+        protocol: TCP
+        tls:
+          enabled: true
     # このクラスタは単一テナント(1人の運用者が全namespaceを管理)であり、
     # namespace分離バイパス系の脆弱性(例: CVE-2026-71325)が意味を持つ
     # マルチテナント環境ではないため、cross-namespaceのIngressRoute参照を許可する。
