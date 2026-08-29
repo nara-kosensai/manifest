@@ -45,7 +45,13 @@ config/
   有効にしている(namespace分離バイパス系の脆弱性はマルチテナント環境でのみ意味を持つ)。
 - `k8s/base/web-static/` — 過去年度アーカイブ(`www-archive`) + storybook + form-preview。
 - `k8s/base/network/` — cloudflared(公開Web用トンネル)。
-- `k8s/base/monitoring/` — Loki, Grafana, Prometheus, node-exporter。
+- `k8s/base/monitoring/` — Loki, Grafana, Prometheus, node-exporter,
+  kube-state-metrics。PrometheusはServiceAccountトークンで認証し
+  (`prometheus-rbac.yaml`)、node-exporter/Traefik/kube-state-metricsに加えて
+  kube-apiserver・kubelet・cAdvisor(`kubernetes_sd_configs`によるnode discovery)
+  もスクレイプする。Grafanaのdatasource(Prometheus/Loki)は自動プロビジョニング
+  していないため、初回は手動で追加が必要
+  (`http://prometheus:9090`, `http://loki:3100`、いずれも`monitoring` namespace内)。
 - `k8s/overlays/shared/` — 上記すべてを対応するnamespaceにまとめて適用する。
 
 ## namespace

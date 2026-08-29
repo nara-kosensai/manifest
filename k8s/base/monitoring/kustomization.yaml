@@ -5,7 +5,9 @@ resources:
   - loki.yaml
   - grafana.yaml
   - prometheus.yaml
+  - prometheus-rbac.yaml
   - node-exporter.yaml
+  - kube-state-metrics.yaml
 
 # grafana-secrets (admin-password, github-client-secret) は
 # infra/README.mdの手順で一度きり手動投入する(gitにコミットしない)。

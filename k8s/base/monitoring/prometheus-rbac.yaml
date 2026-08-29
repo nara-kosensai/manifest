@@ -1,0 +1,42 @@
+# PrometheusがKubernetes API経由でスクレイプ対象を発見し(kubernetes_sd_configs)、
+# apiserver自身・kubelet(cAdvisor含む)のメトリクスを取得するために必要な権限。
+# ClusterRoleは標準的なPrometheus用の最小権限セット(read-onlyのget/list/watchのみ)。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/proxy
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    # namespaceはoverlay側のkustomization.yamlの`namespace:`で自動スタンプされる
+    # base単体では確定しないため、overlays/shared/monitoring側で補完する。

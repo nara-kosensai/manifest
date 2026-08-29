@@ -4,6 +4,12 @@
 # ただしTraefik Serviceが実際に9100番を公開しているかはHelmチャートの
 # バージョンに依存するため、初回適用後 `kubectl get svc -n kube-system traefik`
 # で `metrics` ポートが存在することを確認し、名前/番号が違えば下記を調整すること。
+#
+# kubernetes-apiservers / kubelet / cadvisor の3ジョブは、Prometheus公式が
+# 配布している標準的なin-cluster discoveryレシピ(kubernetes_sd_configs)を
+# そのまま使っている。ServiceAccountトークン(自動マウントされる
+# /var/run/secrets/kubernetes.io/serviceaccount/{token,ca.crt})でapiserver/
+# kubeletのHTTPS APIに認証する。権限は prometheus-rbac.yaml のClusterRole。
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,6 +26,57 @@ data:
       - job_name: 'traefik'
         static_configs:
           - targets: ['traefik.kube-system.svc.cluster.local:9100']
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets: ['kube-state-metrics:8080']
+
+      # kube-apiserver自体のメトリクス(リクエストレイテンシ、エラー率等)。
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+          - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - source_labels:
+              [
+                __meta_kubernetes_namespace,
+                __meta_kubernetes_service_name,
+                __meta_kubernetes_endpoint_port_name,
+              ]
+            action: keep
+            regex: default;kubernetes;https
+
+      # kubelet自体のメトリクス(node/kubelet単位の統計)。apiserver経由の
+      # プロキシではなく、ノードのkubelet(10250番、単一ノードのため直接到達可)を
+      # kubernetes_sd_configsのrole: nodeで自動発見して叩く。
+      - job_name: 'kubelet'
+        kubernetes_sd_configs:
+          - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+
+      # cAdvisor(Pod/コンテナ単位のCPU/メモリ)。kubeletの/metrics/cadvisorを
+      # 同様にrole: nodeで自動発見。
+      - job_name: 'kubernetes-cadvisor'
+        kubernetes_sd_configs:
+          - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        metrics_path: /metrics/cadvisor
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -49,6 +106,7 @@ spec:
       labels:
         app: prometheus
     spec:
+      serviceAccountName: prometheus
       containers:
         - name: prometheus
           image: prom/prometheus:v2.51.0
