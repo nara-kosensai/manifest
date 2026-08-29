@@ -8,12 +8,14 @@
 # 唯一の例外が本番アプリ(nara-kosensai.com / www.nara-kosensai.com)で、
 # CloudflareのOrigin Authentication(Authenticated Origin Pulls, mTLS)を使い
 # Tunnelを経由せず直接オリジンへ到達させる構成にしている。このためだけに
-# `websecure-mtls` エントリーポイントを追加し、コンテナの8443番ポートを
+# `websecure-mtls` エントリーポイントを追加し、コンテナの8444番ポートを
 # ノードの公開インターフェースの443番に `hostPort` で直接バインドする
-# (Service自体はClusterIPのままなので、80番(`web`, Tunnel専用)は
-# 引き続き非公開)。test/storybook/grafana/infisical/pgadmin等はこれまで通り
-# `web` エントリーポイントのみを使いTunnel経由とする(このエントリーポイントに
-# IngressRouteをbindしなければ、443番からは絶対に到達できない)。
+# (コンテナポートをTraefik Helmチャートのデフォルト`websecure`エントリーポイントが
+# 既に使っている8443番と衝突しないよう8444番にしている。Service自体は
+# ClusterIPのままなので、80番(`web`, Tunnel専用)は引き続き非公開)。
+# test/storybook/grafana/pgadmin等はこれまで通り`web`エントリーポイントのみを
+# 使いTunnel経由とする(このエントリーポイントにIngressRouteをbindしなければ、
+# 443番からは絶対に到達できない)。
 # 経緯は nara-kosensai/config の README.md「Origin Authentication (mTLS)」の節を参照。
 #
 # k3s はこのファイルを /var/lib/rancher/k3s/server/manifests/ に置くと
@@ -34,7 +36,7 @@ spec:
       type: ClusterIP
     ports:
       websecure-mtls:
-        port: 8443
+        port: 8444
         hostPort: 443
         expose:
           default: true

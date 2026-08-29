@@ -96,7 +96,8 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
 ### 仕組み
 
 - `k3s/traefik-config.yaml` に `websecure-mtls` エントリーポイントを追加し、
-  コンテナの8443番を `hostPort: 443` でノードの公開インターフェースに直接bind
+  コンテナの8444番(デフォルトの`websecure`エントリーポイントが使う8443番との
+  衝突を避けるため)を `hostPort: 443` でノードの公開インターフェースに直接bind
   している(Serviceは引き続きClusterIPなので、Tunnel専用の`web`(80番)は
   非公開のまま)。
 - `k8s/base/network/cloudflare-aop-ca.yaml` に、Cloudflareが公開している
