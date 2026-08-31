@@ -1,0 +1,331 @@
+# nara-kosensai システム構成・仕様書
+
+対象リポジトリ: `nara-kosensai/manifest`(旧 `config`)、`fumikun/2026kosensai`
+最終更新: 2026-08-29
+
+> この文書は [architecture.typ](architecture.typ) / [architecture.pdf](architecture.pdf) のMarkdown版。
+> 内容はTypst版と同期させること。図表を含む正式な整形版はPDFを参照。
+
+## 目次
+
+- [概要](#概要)
+- [アーキテクチャ](#アーキテクチャ)
+  - [リクエスト経路](#リクエスト経路)
+  - [namespace構成](#namespace構成)
+- [ネットワーク・セキュリティ](#ネットワークセキュリティ)
+  - [公開ポート](#公開ポート)
+  - [TLS / mTLS](#tls--mtls)
+  - [RBAC](#rbac)
+- [シークレット管理](#シークレット管理)
+- [CI/CDパイプライン](#cicdパイプライン)
+- [監視](#監視)
+- [障害と設計判断](#障害と設計判断)
+- [リファレンス](#リファレンス)
+
+## 概要
+
+nara-kosensaiは、単一VPS上のシングルノードk3sクラスタで運用されている。旧構成(VPSネイティブのnginx
+と複数のdocker-compose)から全面移行したもので、外部通信は原則Cloudflare Tunnel経由のみとし、クラス
+タはノードの公開インターフェースに極力ポートをバインドしない。唯一の例外が本番アプリ
+(`nara-kosensai.com` / `www.nara-kosensai.com`)で、CloudflareのOrigin
+Authentication(mTLS)を使い、Tunnelを経由せず直接オリジンに到達させる。
+
+このクラスタの設定は4つのリポジトリに分散して管理する。特定サービスに紐づかない共有プラット
+フォーム設定・クラスタブートストラップは本リポジトリ(`nara-kosensai/manifest`)に、アプリ/コンテ
+ンツ固有の設定はそれぞれのサービスのリポジトリに置く方針である。
+
+| リポジトリ | 内容 |
+| --- | --- |
+| `nara-kosensai/manifest`(本リポジトリ) | クラスタブートストラップ(`k3s/`)、特定サービスに紐づかない共有プラットフォーム設定(`k8s/`：cloudflared, Grafana/Loki/Prometheus, 過去年度アーカイブ, storybook, kosensai-form-preview のデプロイ定義)、この仕様書。CIは`main`ブランチへのpushで発火 |
+| `fumikun/2026kosensai` | 当年アプリ本体(backend/frontend/db/pgadmin/website)のDockerfile・k8sマニフェスト(`infra/k8s/base/`, `overlays/{prod,test}`)・CI/CD。`prod`/`test`ブランチへのpushでそれぞれ本番/検証環境にデプロイ |
+| `nara-kosensai/www` | 過去年度(2017--2025)アーカイブサイトの中身と、そのイメージをビルドするDockerfile・CI。デプロイ先マニフェスト(`k8s/base/web-static/archive-*.yaml`)は本リポジトリ側が保持する |
+| `fumikun/kosensai-form-preview` | 高専祭掲載情報プレビューツール本体・CI。デプロイ先マニフェストは本リポジトリ側(`k8s/base/web-static/form-preview-*.yaml`) |
+
+*(表: 設定リポジトリの役割分担)*
+
+> **リポジトリ名について**：本リポジトリはGitHub上で`nara-kosensai/config`から`nara-kosensai/manifest`へリネーム済み(2026年)。リネーム後もGitHubは旧URL(`.../config.git`)から新URLへの参照を自動転送するため、旧URLを`origin`に設定した既存クローンはfetch/pushとも動作し続けるが、新規クローンやCIの`checkout`アクションは新URL(`nara-kosensai/manifest`)を使うのが望ましい。ドキュメント内では現在の正式名`manifest`を主に用い、旧名`config`は文脈上必要な場合のみ併記する。
+
+## アーキテクチャ
+
+### リクエスト経路
+
+外部からのリクエストは、宛先ホストによって2つの異なる経路のいずれかを通る。両方とも最終的に同一の
+Traefik Pod(namespace: `kube-system`)へ到達するが、Traefikの中では別々のentrypointとして扱わ
+れ、互いに干渉しない。
+
+```mermaid
+flowchart TD
+    Browser["ブラウザ"] --> CF["Cloudflare Edge"]
+
+    CF -->|本番| NIC["VPS公開IF\nens3:443"]
+    CF -->|それ以外| CFD["cloudflared Pod\n(namespace: network)"]
+
+    NIC --> NFT["nftablesゲート\niifname=ens3 かつ\nCloudflare IPのみ許可"]
+    NFT --> Traefik
+    CFD --> Traefik
+
+    Traefik["Traefik(1 Pod・2 entrypoint)\nwebsecure-mtls / web"]
+
+    Traefik -->|websecure-mtls| Prod["namespace: prod"]
+    Traefik -->|web| Others["namespace: test / web-static / monitoring"]
+```
+
+*(図: 本番(mTLS Origin Auth)とそれ以外(Cloudflare Tunnel)、2つの入口経路)*
+
+上図の通り、`websecure-mtls`だけがホストポートに紐づいたentrypointであり、`web`にはホストへの
+bindが一切ない。したがって`web`側に残されたIngressRouteは、たとえnftablesのフィルタやクライアン
+ト証明書の検証が何らかの理由で回避されたとしても、インターネットからは構造的に到達不可能である
+([障害と設計判断](#障害と設計判断)も参照)。
+
+| 段階 | 本番 --- mTLS Origin Auth | それ以外 --- Cloudflare Tunnel |
+| --- | --- | --- |
+| 対象ホスト | `nara-kosensai.com` / `www.nara-kosensai.com` | `test.*` / `storybook.*` / `grafana.*` / `pgadmin*.*` / `info-check.*` |
+| Cloudflareエッジ | SSL/TLS: Full (strict) + Authenticated Origin Pulls | Cloudflare Tunnel(通常のDNS/SSLモード設定とは独立に動作) |
+| VPSへの入口 | 公開インターフェース `ens3:443`(hostPort) | `cloudflared` Pod(namespace: `network`)、VPS側からのoutbound接続のみ |
+| フィルタ | nftables raw prerouting： `iifname == ens3` かつ `tcp dport 443` かつ `saddr ∉ Cloudflare IP` → drop(無応答) | 該当なし(公開ポートを一切持たないため到達手段自体が存在しない) |
+| Traefik entrypoint | `websecure-mtls` ・hostPort 443 ・サーバ証明書はOrigin CA証明書 ・`TLSOption`(`RequireAndVerifyClientCert`)でクライアント証明書を検証 | `web` ・ClusterIP :80のみ ・ホストへのbindなし |
+| 到達先 namespace | `prod` | `test` / `web-static` / `monitoring` |
+
+*(表: 2つの入口経路の対比)*
+
+上記2経路を時系列で見たシーケンス図は以下の通り。
+
+```mermaid
+sequenceDiagram
+    participant Client as ブラウザ
+    participant CFEdge as Cloudflare Edge
+    participant NIC as VPS公開IF(ens3:443)
+    participant NFT as nftablesゲート
+    participant CFD as cloudflared Pod(network)
+    participant Traefik as Traefik(websecure-mtls / web)
+    participant App as アプリPod
+
+    Client->>CFEdge: HTTPS GET https://<host>/...
+
+    alt 本番ホスト(nara-kosensai.com / www) --- mTLS Origin Auth
+        CFEdge->>NIC: オリジンへ直接接続(Full strict + Authenticated Origin Pulls)
+        NIC->>NFT: パケット到達(iifname=ens3, tcp dport 443)
+        NFT-->>NFT: saddr が Cloudflare IP か判定
+        NFT--xNFT: 不一致ならサイレントdrop(以降処理なし)
+        NFT->>Traefik: 一致した場合のみ転送
+        Traefik->>Traefik: websecure-mtls entrypoint\nクライアント証明書検証(RequireAndVerifyClientCert)
+        Traefik->>App: namespace: prod へルーティング
+        App-->>Traefik: レスポンス
+    else それ以外のホスト(test.* / storybook.* / grafana.* / pgadmin*.* / info-check.*) --- Cloudflare Tunnel
+        CFEdge->>CFD: Tunnel経由で転送(cloudflaredのoutbound接続を再利用)
+        CFD->>Traefik: web entrypoint(ClusterIP:80、ホストへのbindなし)
+        Traefik->>App: namespace: test / web-static / monitoring へルーティング
+        App-->>Traefik: レスポンス
+    end
+
+    Traefik-->>CFEdge: レスポンス
+    CFEdge-->>Client: レスポンス
+```
+
+*(図: リクエスト処理のシーケンス。nftablesで弾かれた場合はTraefikに到達する前に無応答でdropされる点に注意)*
+
+```nft
+table ip cloudflare_mtls {
+  set cf_ipv4 { type ipv4_addr; flags interval; elements = { ... } }
+  chain prerouting {
+    type filter hook prerouting priority raw; policy accept;
+    iifname "ens3" tcp dport 443 ip saddr != @cf_ipv4 drop
+  }
+}
+table ip6 cloudflare_mtls6 {
+  set cf_ipv6 { type ipv6_addr; flags interval; elements = { ... } }
+  chain prerouting {
+    type filter hook prerouting priority raw; policy accept;
+    iifname "ens3" tcp dport 443 ip6 saddr != @cf_ipv6 drop
+  }
+}
+```
+
+*(ソースコード: Cloudflare IP allowlist(nftables、`k3s/cloudflare-ip-allowlist.sh`が生成。IPv4/IPv6で独立したテーブルを持つ))*
+
+`cloudflare-ip-allowlist.sh`は冪等な全置換方式で動作する：新レンジ取得 → 一時ファイルに新rulesetを組み立て → 既存の`cloudflare_mtls` / `cloudflare_mtls6`テーブルを削除 → `nft -f`で新rulesetをアトミックに適用、という順序を取る。`curl`でのレンジ取得に失敗した場合は`set -euo pipefail`によりテーブル削除前に異常終了するため、古いルールが残ったフェイルセーフ側に倒れる。一方、テーブル削除後の`nft -f`適用自体が失敗した場合は、次回のtimer実行(最大24時間+ランダム遅延)までdropルールが存在しない期間が生まれうる(既知の課題、[operations.md](operations.md)参照)。
+
+### namespace構成
+
+| namespace | 代表ホスト | 内容 |
+| --- | --- | --- |
+| `prod` | `nara-kosensai.com` / `www` | frontend・backend・db (StatefulSet)・website・pgadmin |
+| `test` | `test.nara-kosensai.com` | frontend・backend・db・website・pgadmin |
+| `web-static` | `storybook.*` / `info-check.*` | www-archive(過去年度アーカイブ)・storybook・form-preview |
+| `monitoring` | `grafana.nara-kosensai.com` | grafana・loki・prometheus・node-exporter・kube-state-metrics |
+| `network` | --- | cloudflared(公開Web用Tunnel) |
+| `kube-system` | --- | Traefik(k3s同梱)・CoreDNS |
+
+*(表: namespace一覧)*
+
+管理元は`prod`/`test`が`2026kosensai`リポジトリのCI、それ以外が`manifest`リポジトリのCI。
+`web-static`/`prod`/`test`のIngressRouteは、過去年度アーカイブ(`web-static` namespace)のService
+をcross-namespaceで参照する。単一テナント運用のクラスタであるため、Traefikの
+`providers.kubernetesCRD.allowCrossNamespace: true`を有効にしている。
+
+### Ingressルーティング(旧nginxからの移植)
+
+旧構成のnginx `default.conf`のserver blockが持っていたパス単位のルーティング・リダイレクト
+ロジックは、TraefikのIngressRoute/Middlewareとして`2026kosensai`リポジトリ側に移植した
+(`infra/k8s/overlays/{prod,test}/ingress/`)。nginxのlongest-prefix-wins相当を明示的な
+`priority`(数値が大きいほど高優先)で再現している。
+
+| priority | マッチ条件(prod, Host=nara-kosensai.com) | Middleware | 転送先 |
+| --- | --- | --- | --- |
+| 100 | `Host(www.nara-kosensai.com)` | `www-to-apex`(恒久リダイレクト) | apexへ301 |
+| 90 | `Path(/)` / `Path(/2026)` / `Path(/2026/app)` | `redirect-root` 等(末尾`/`付与) | 301 |
+| 80 | `PathPrefix(/2026/app/)` | `security-headers` | frontend :3000 |
+| 70 | `PathPrefix(/2009..2016, /2021)` | `old-years-redirect` | 学校公式サイトへ301 |
+| 60 | `PathPrefix(/2026/)` | `security-headers`(testのみ`strip-2026-prefix`も併用) | website :80 |
+| 10 | `PathPrefix(/)`(catch-all) | `security-headers`, `archive-404` | www-archive :80(namespace: web-static) |
+
+*(表: prod IngressRouteのルーティング優先度。testもほぼ同構成、mTLSではなくTunnel経由)*
+
+補足:
+
+- **`strip-2026-prefix`**：当年サイト(Astro)は`base: "/2026"`でビルドされ、生成HTML内のアセット参照は`/2026/...`前提。prodは旧nginxの`alias`相当の動作(内部的にプレフィックス除去)をwebsiteコンテナ側のビルド設定で吸収しているためMiddleware不要だが、testのwebsite Serviceは素のリバースプロキシ転送のため明示的な`StripPrefix`が必要(`infra/k8s/base/website/website-stripprefix.yaml`)。
+- **`archive-404`**：`Host + PathPrefix(/)`のcatch-allにヒットした結果を404として、`web-static` namespaceの`www-archive` Serviceが持つ`/2025/404.html`をerrors Middleware経由で返す(旧nginxの`root /var/www/html/` + `/404.html` aliasの再現)。
+- **`security-headers`** Middleware(`k8s/base/ingress/security-headers.yaml`、`2026kosensai`リポジトリにも同一内容を複製配置)は、`X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`に加え、Google Tag Manager / Google Fonts / YouTube埋め込みを許可するCSPを全ホスト共通で付与する。
+- **pgAdmin**(`pgadmin.nara-kosensai.com` / `pgadmin-test.*`)は`web` entrypointのみを使い(Tunnel経由)、TraefikのMiddlewareではなくCloudflare Access(Tunnelのpublic hostnameに紐づく認証ポリシー、ダッシュボード側で一度きり設定)で保護する。
+
+#### Cloudflare Tunnel側のingress設定
+
+`web`entrypoint行きの全ホストは、`cloudflared`(namespace: `network`)のConfigMap(`k8s/base/network/cloudflared-configmap.yaml`)で一律`http://traefik.kube-system.svc.cluster.local:80`へ転送されるよう設定してあり、ホスト単位の実際の振り分けは前述の各namespaceのIngressRouteに委ねている。Tunnelのingressルールに現れるホストは`test.*`, `storybook.*`, `info-check.*`, `pgadmin.*`, `pgadmin-test.*`, `grafana.*`で、末尾は`service: http_status:404`のcatch-allで閉じる。本番ホスト(`nara-kosensai.com` / `www`)は、Origin Authentication移行が完了した時点でこのConfigMapのingressエントリから削除済み(現在Tunnel経由で到達するのは`test`/`web-static`/`monitoring`配下のホストのみ)。
+
+## ネットワーク・セキュリティ
+
+### 公開ポート
+
+VPSの公開インターフェースにbindされるポートは443/tcpのみ。80/tcpはTraefikの`web`
+entrypointがClusterIPのみで待ち受けており、ホストには一切bindされない。
+
+443/tcpへのアクセス制限は、VPSプロバイダ側とホスト側で役割が異なる。
+
+1. **VPSプロバイダのファイアウォール(セキュリティグループ)**：ポート単位の制限のみを行う(443/tcpと管理用SSH以外を閉じる)。送信元IPアドレスによるフィルタリングは行っていない――つまりこの層だけでは、Cloudflare以外の任意のIPから443/tcpへ到達できてしまう。
+2. **ホスト側nftables**(`k3s/cloudflare-ip-allowlist.sh`、上記nftルール参照)：送信元IPアドレスのフィルタリングは、この層が唯一かつ全面的に担っている。Cloudflareが公開しているIPv4/IPv6レンジ(`https://www.cloudflare.com/ips-v4`, `ips-v6`)を、raw prerouting段階でパケットの送信元インターフェース(`iifname`、デフォルトルートから動的に解決)と組み合わせて判定する。マッチしない場合はTCPハンドシェイクにもTLSアラートにも至らずサイレントにdropする。IPv4/IPv6それぞれ独立したテーブル(`ip cloudflare_mtls` / `ip6 cloudflare_mtls6`)を持つ。systemd timer(`cloudflare-ip-allowlist.timer`)が日次でレンジを再取得し、`manifest`リポジトリへのpush時にもCIが都度再実行する。
+
+したがって、Cloudflare IPアローリストの実体は完全にnftables側にある。このスクリプトが失敗した状態が長く続くと、VPSプロバイダ側のファイアウォールはそれを補ってくれない(運用マニュアル[operations.md](operations.md)の「1. Cloudflare IPアローリストの更新不具合」を参照)。
+
+### TLS / mTLS
+
+- **オリジンサーバ証明書**：Cloudflare Origin CA証明書。SANは`nara-kosensai.com`と
+  `*.nara-kosensai.com`をカバー(有効期限2041年)。`2026kosensai`リポジトリの
+  `production-vps` environmentのGitHub Environment Secret(`CF_ORIGIN_CERT` /
+  `CF_ORIGIN_KEY`)として保管し、CIが`prod` namespaceに`cloudflare-origin-cert`
+  (`kubernetes.io/tls`)Secretとして投入する。
+- **クライアント証明書検証**：Traefikの`TLSOption`(namespace: `network`、名前
+  `cloudflare-mtls`)が、Cloudflareが公開しているAuthenticated Origin Pulls用CA証明書
+  (`k8s/base/network/cloudflare-aop-ca.yaml`、公開情報のためgit管理)に対して
+  `RequireAndVerifyClientCert`を要求する。FreeプランのためCloudflare管理のzone-level
+  証明書を使用する(per-hostnameのカスタムクライアント証明書は非対応)。
+
+```yaml
+spec:
+  entryPoints:
+    - websecure-mtls
+  tls:
+    secretName: cloudflare-origin-cert
+    options:
+      name: cloudflare-mtls
+      namespace: network
+```
+
+*(ソースコード: prod IngressRouteのTLS設定(2026kosensai `infra/k8s/overlays/prod/ingress/ingressroute.yaml`))*
+
+### RBAC
+
+Prometheusとkube-state-metricsは、それぞれ専用のServiceAccountで動作し、read-onlyの
+`get`/`list`/`watch`のみを許可するClusterRoleを持つ(`k8s/base/monitoring/prometheus-rbac.yaml`、
+`kube-state-metrics.yaml`)。既定のServiceAccountには何の権限も付与しない。
+
+kube-state-metrics用ClusterRoleは`list`/`watch`のみだが、対象リソースには`secrets`が含まれる(Secret自体の値ではなく、存在・メタデータを可視化するため標準的に必要とされる範囲)。書き込み権限は一切付与していない。Prometheus用ClusterRoleはノード・Pod・Service・Endpointsの`get`/`list`/`watch`に加え、kube-apiserver/kubelet/cAdvisorのメトリクスエンドポイントにアクセスするためServiceAccountトークンをbearer tokenとして使う(`kubernetes_sd_configs`によるin-cluster discovery、TLS検証は`kubelet`ジョブのみ`insecure_skip_verify: true`で緩めている。単一ノード・単一テナント運用のため許容)。
+
+## シークレット管理
+
+Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在の方針を以下に示す。
+
+| 対象 | 保管場所 | 理由 |
+| --- | --- | --- |
+| DB / pgAdmin / CORS等 (`app-env`) | `manifest`リポジトリ直下の `prod.env` / `staging.env`(平文コミット) | DBはClusterIP限定で外部到達不能 |
+| GHCR pullトークン | GitHub Environment Secret(`production-vps` / `test-vps`) | CIからのみ必要 |
+| Cloudflare Origin CA証明書 | GitHub Environment Secret(`production-vps`、環境限定) | 本番専用の機微情報 |
+| Cloudflare Access クライアント資格情報 | GitHub Actions Secret(管理用SSH Tunnel専用) | app-envとは無関係 |
+| Grafana管理者パスワード等 | k8s Secret(`grafana-secrets`)ブートストラップ時に手動投入 | gitignore対象、循環依存を避けるため |
+| Cloudflare Tunnel(公開Web用)資格情報 | k8s Secret(`cloudflared-credentials`、namespace: `network`)ブートストラップ時に手動投入 | `cloudflared tunnel create`で生成される`credentials.json`はCLI操作でのみ得られる |
+| GHCR pullトークン(`web-static` namespace用) | k8s Secret(`ghcr-pull`)ブートストラップ時に手動投入 | `www-archive`/`storybook`/`form-preview`イメージがprivateなため |
+
+*(表: シークレットの保管場所と方針)*
+
+`manifest`リポジトリのCIが`prod.env` / `staging.env`をVPSの`/home/github/app-env/`に同期
+し、`2026kosensai`リポジトリのCIがそのパスを直接`--from-env-file`で参照する。このため
+`manifest`側のCIが`2026kosensai`側より先に一度動いている必要がある。同様に、`web-static` namespaceの`ghcr-pull` Secretは`manifest`側CIが適用する`k8s/overlays/shared`がDeploymentを作成する前提として存在している必要があり、これも一度きりの手動投入である。
+
+`prod`/`test` namespaceの`ghcr-pull`(2026kosensaiアプリのイメージpull用)は`2026kosensai`リポジトリのCI自身が、GitHub Environment Secret(`GHCR_PULL_TOKEN`)からデプロイの都度`kubectl create secret ... --dry-run=client -o yaml | kubectl apply -f -`で再生成する(こちらは一度きりの手動投入ではなくCI管理)。トークン期限切れ時の症状・対処は[operations.md](operations.md)の「3. GHCR pullトークンの期限切れ・権限エラー(403)」を参照。
+
+## CI/CDパイプライン
+
+| リポジトリ / ブランチ | 処理内容 |
+| --- | --- |
+| `manifest` → `main` | k3sブートストラップマニフェスト再配置 → Cloudflare IP allowlist再実行 → `kubectl apply -k k8s/overlays/shared` → 各Deploymentのrollout確認 |
+| `2026kosensai` → `prod` | イメージbuild/push → GHCR pullトークン・Origin CA証明書をGitHub Secretsから取得 → `kubectl apply -k infra/k8s/overlays/prod`(backend/frontend/website個別にpath-filter判定)→ rollout確認 |
+| `2026kosensai` → `test` | 同上(test namespace、pgAdmin用Cloudflare Accessは別途手動設定) |
+
+*(表: CI/CDパイプライン一覧)*
+
+いずれもGitHub ActionsからVPSへは、管理用のCloudflare Access Tunnel(`cloudflared access tcp`)
+経由でSSH接続する。これは公開Web用のTunnel(namespace `network`のcloudflared)とは別物で、VPS
+側からのoutbound接続であるため、[公開ポート](#公開ポート)のnftables allowlistとは無関係に動作する。
+
+## 監視
+
+Prometheus(namespace `monitoring`)は次をスクレイプする。
+
+- `node-exporter`：ノードのCPU/メモリ/ディスク
+- `traefik`：Traefik自身のメトリクス(現状9100番ポートが未公開のため要修正、既知の課題)
+- `kube-state-metrics`：Pod/Deployment/StatefulSetのオブジェクト状態(Running/Restart回数/Readyレプリカ数)
+- `kubernetes-apiservers`：kube-apiserverのリクエストレイテンシ・エラー率
+- `kubelet` / `kubernetes-cadvisor`：ノード・Pod単位のリソース使用量
+
+いずれも`kubernetes_sd_configs`によるin-cluster discoveryと、ServiceAccountトークン
+(`/var/run/secrets/kubernetes.io/serviceaccount/`)による認証を使う標準的な構成。Grafanaの
+Prometheus/Lokiデータソースは自動プロビジョニングしておらず、初回のみ手動追加が必要
+(`http://prometheus:9090`, `http://loki:3100`、いずれも`monitoring` namespace内)。ログは
+Grafana Alloy(DaemonSet、`k3s/alloy-logging.yaml`)が全namespaceのPodログをLokiへ出荷する。
+
+## 障害と設計判断
+
+### nftablesルールのインターフェーススコープ(2026-08-29)
+
+Origin Authentication導入時に追加したnftablesルールが、当初`tcp dport 443`のみで判定してお
+り、送信元インターフェースを指定していなかった。クラスタ内部には`kubernetes.default.svc`
+(ClusterIP、`10.43.0.1:443`)を含む複数のClusterIPがたまたま443番を使っており、このルールは
+Pod→APIサーバー間の内部通信まで巻き込んでdropしてしまった。
+
+結果として`helm-install-traefik`ジョブ(Traefikの新しいエントリーポイント設定を適用するための
+Helmインストール)がAPIサーバーに到達できず、インストール失敗→アンインストール→再インストール
+のクラッシュループに陥り、Traefik自体が消滅。本番環境が約1時間ダウンした(Cloudflareエラー
+521/526)。
+
+**対処**：ルールを`iifname`(ノードの実際の外部NIC。ハードコードではなく`ip route show default`
+から都度動的に解決)でスコープした。クラスタ内部のトラフィックは定義上この物理インターフェース
+を通らないため、どのClusterIPが443番を使っていても衝突しない。
+
+同時に、Traefikのコンテナポート・Service公開ポートでも類似の衝突が発生していた
+(`websecure-mtls`をchartのデフォルト`websecure`と同じ8443番/443番で定義していたため)。コンテ
+ナポートは8444番、Service公開は`expose.default: false`(hostPortのみ、Service経由の公開はそも
+そも不要)に変更して解消した。
+
+## リファレンス
+
+| 項目 | 値 |
+| --- | --- |
+| Kubernetesディストリビューション | k3s(シングルノード) |
+| Ingressコントローラ | Traefik 3.7(k3s同梱Helmチャート) |
+| CNI | flannel(k3s標準) |
+| ストレージ | local-path(既定)、local-path-retain(データ保護が必要なPVC用) |
+| 公開ポート | 443/tcpのみ(80/tcpはClusterIP限定で非公開) |
+| Traefik `websecure-mtls` | containerPort 8444, hostPort 443, expose.default: false |
+| Traefik `web` | containerPort 8000相当(chart既定), ClusterIP:80のみ |
+| 管理用SSH | Cloudflare Access Tunnel(公開Web用Tunnelとは別物、outbound-only) |
+
+*(表: 設定値リファレンス)*

@@ -153,7 +153,9 @@ nara-kosensaiは、単一VPS上のシングルノードk3sクラスタで運用�
 (`nara-kosensai.com` / `www.nara-kosensai.com`)で、CloudflareのOrigin
 Authentication(mTLS)を使い、Tunnelを経由せず直接オリジンに到達させる。
 
-設定は2つのリポジトリで管理する。
+このクラスタの設定は4つのリポジトリに分散して管理する。特定サービスに紐づかない共有プラット
+フォーム設定・クラスタブートストラップは本リポジトリ(`nara-kosensai/manifest`)に、アプリ/コンテ
+ンツ固有の設定はそれぞれのサービスのリポジトリに置く方針である(@repo-table)。
 
 #figure(
   table(
@@ -162,19 +164,40 @@ Authentication(mTLS)を使い、Tunnelを経由せず直接オリジンに到達
     inset: 8pt,
     align: (left, left),
     table.header([*リポジトリ*], [*内容*]),
-    [`nara-kosensai/manifest`], [
+    [`nara-kosensai/manifest`\ (本リポジトリ)], [
       クラスタブートストラップ(`k3s/`)、特定サービスに紐づかない共有プラットフォーム設定
       (`k8s/`：cloudflared, Grafana/Loki/Prometheus, 過去年度アーカイブ, storybook,
-      kosensai-form-preview)、この仕様書
+      kosensai-form-preview のデプロイ定義)、この仕様書。CIは`main`ブランチへのpushで発火
     ],
     [`fumikun/2026kosensai`], [
-      アプリ本体(backend/frontend/db/pgadmin/website)のDockerfile・k8sマニフェスト
-      (`infra/k8s/base/`, `overlays/{prod,test}`)・CI/CD
+      当年アプリ本体(backend/frontend/db/pgadmin/website)のDockerfile・k8sマニフェスト
+      (`infra/k8s/base/`, `overlays/{prod,test}`)・CI/CD。`prod`/`test`ブランチへの
+      pushでそれぞれ本番/検証環境にデプロイ
+    ],
+    [`nara-kosensai/www`], [
+      過去年度(2017--2025)アーカイブサイトの中身と、そのイメージをビルドする
+      Dockerfile・CI。デプロイ先マニフェスト(`k8s/base/web-static/archive-*.yaml`)は
+      本リポジトリ側が保持する
+    ],
+    [`fumikun/kosensai-form-preview`], [
+      高専祭掲載情報プレビューツール本体・CI。デプロイ先マニフェストは本リポジトリ側
+      (`k8s/base/web-static/form-preview-*.yaml`)
     ],
   ),
   caption: [設定リポジトリの役割分担],
   kind: "hyo",
 ) <repo-table>
+
+#block(inset: (top: 0.4em))[
+  #text(size: 10.5pt)[
+    *リポジトリ名について*：本リポジトリはGitHub上で`nara-kosensai/config`から
+    `nara-kosensai/manifest`へリネーム済み(2026年)。リネーム後もGitHubは旧URL
+    (`.../config.git`)から新URLへの参照を自動転送するため、旧URLを`origin`に設定した
+    既存クローンはfetch/pushとも動作し続けるが、新規クローンやCIの`checkout`アクションは
+    新URL(`nara-kosensai/manifest`)を使うのが望ましい。ドキュメント内では現在の正式名
+    `manifest`を主に用い、旧名`config`は文脈上必要な場合のみ併記する。
+  ]
+]
 
 = アーキテクチャ
 
@@ -282,10 +305,26 @@ Traefik Pod(namespace: `kube-system`)へ到達するが、Traefikの中では別
       iifname "ens3" tcp dport 443 ip saddr != @cf_ipv4 drop
     }
   }
+  table ip6 cloudflare_mtls6 {
+    set cf_ipv6 { type ipv6_addr; flags interval; elements = { ... } }
+    chain prerouting {
+      type filter hook prerouting priority raw; policy accept;
+      iifname "ens3" tcp dport 443 ip6 saddr != @cf_ipv6 drop
+    }
+  }
   ```,
-  caption: [Cloudflare IP allowlist(nftables、`k3s/cloudflare-ip-allowlist.sh`が生成)],
+  caption: [Cloudflare IP allowlist(nftables、`k3s/cloudflare-ip-allowlist.sh`が生成。
+    IPv4/IPv6で独立したテーブルを持つ)],
   kind: raw,
 ) <nft-rule>
+
+`cloudflare-ip-allowlist.sh`は冪等な全置換方式で動作する：新レンジ取得 →
+一時ファイルに新rulesetを組み立て → 既存の`cloudflare_mtls` / `cloudflare_mtls6`テーブルを
+削除 → `nft -f`で新rulesetをアトミックに適用、という順序を取る。`curl`でのレンジ取得に失敗
+した場合は`set -euo pipefail`によりテーブル削除前に異常終了するため、古いルールが残った
+フェイルセーフ側に倒れる。一方、テーブル削除後の`nft -f`適用自体が失敗した場合は、次回の
+timer実行(最大24時間+ランダム遅延)までdropルールが存在しない期間が生まれうる(既知の課題、
+`operations.md`参照)。
 
 == namespace構成
 
@@ -312,6 +351,61 @@ Traefik Pod(namespace: `kube-system`)へ到達するが、Traefikの中では別
 をcross-namespaceで参照する。単一テナント運用のクラスタであるため、Traefikの
 `providers.kubernetesCRD.allowCrossNamespace: true`を有効にしている。
 
+== Ingressルーティング(旧nginxからの移植)
+
+旧構成のnginx `default.conf`のserver blockが持っていたパス単位のルーティング・リダイレクト
+ロジックは、TraefikのIngressRoute/Middlewareとして`2026kosensai`リポジトリ側に移植した
+(`infra/k8s/overlays/{prod,test}/ingress/`)。nginxのlongest-prefix-wins相当を明示的な
+`priority`(数値が大きいほど高優先)で再現している(@ingress-priority)。
+
+#figure(
+  table(
+    columns: (auto, auto, 1fr, 1fr),
+    stroke: 0.5pt + gray,
+    inset: 8pt,
+    align: (center, left, left, left),
+    table.header([*priority*], [*マッチ条件(prod, Host=nara-kosensai.com)*], [*Middleware*], [*転送先*]),
+    [100], [`Host(www.nara-kosensai.com)`], [`www-to-apex`(恒久リダイレクト)], [apexへ301],
+    [90], [`Path(/)` / `Path(/2026)` / `Path(/2026/app)`], [`redirect-root` 等(末尾`/`付与)], [301],
+    [80], [`PathPrefix(/2026/app/)`], [`security-headers`], [frontend :3000],
+    [70], [`PathPrefix(/2009..2016, /2021)`], [`old-years-redirect`], [学校公式サイトへ301],
+    [60], [`PathPrefix(/2026/)`], [`security-headers`\ (testのみ`strip-2026-prefix`も併用)], [website :80],
+    [10], [`PathPrefix(/)`(catch-all)], [`security-headers`, `archive-404`], [www-archive :80\ (namespace: web-static)],
+  ),
+  caption: [prod IngressRouteのルーティング優先度(testもほぼ同構成、mTLSではなくTunnel経由)],
+  kind: "hyo",
+) <ingress-priority>
+
+補足:
+
+- *`strip-2026-prefix`*：当年サイト(Astro)は`base: "/2026"`でビルドされ、生成HTML内の
+  アセット参照は`/2026/...`前提。prodは旧nginxの`alias`相当の動作(内部的にプレフィックス
+  除去)をwebsiteコンテナ側のビルド設定で吸収しているためMiddleware不要だが、testの
+  website Serviceは素のリバースプロキシ転送のため明示的な`StripPrefix`が必要
+  (`infra/k8s/base/website/website-stripprefix.yaml`)。
+- *`archive-404`*：`Host + PathPrefix(/)`のcatch-allにヒットした結果を404として、
+  `web-static` namespaceの`www-archive` Serviceが持つ`/2025/404.html`をerrors
+  Middleware経由で返す(旧nginxの`root /var/www/html/` + `/404.html` aliasの再現)。
+- *`security-headers`* Middleware(`k8s/base/ingress/security-headers.yaml`、
+  `2026kosensai`リポジトリにも同一内容を複製配置)は、`X-Frame-Options`,
+  `X-Content-Type-Options`, `Strict-Transport-Security`に加え、Google Tag Manager /
+  Google Fonts / YouTube埋め込みを許可するCSPを全ホスト共通で付与する。
+- *pgAdmin*(`pgadmin.nara-kosensai.com` / `pgadmin-test.*`)は`web`
+  entrypointのみを使い(Tunnel経由)、TraefikのMiddlewareではなくCloudflare Access
+  (Tunnelのpublic hostnameに紐づく認証ポリシー、ダッシュボード側で一度きり設定)で保護する。
+
+=== Cloudflare Tunnel側のingress設定
+
+`web`entrypoint行きの全ホストは、`cloudflared`(namespace: `network`)の
+ConfigMap(`k8s/base/network/cloudflared-configmap.yaml`)で一律
+`http://traefik.kube-system.svc.cluster.local:80`へ転送されるよう設定してあり、ホスト単位の
+実際の振り分けは前述の各namespaceのIngressRouteに委ねている。Tunnelのingressルールに現れる
+ホストは`test.*`, `storybook.*`, `info-check.*`, `pgadmin.*`, `pgadmin-test.*`,
+`grafana.*`で、末尾は`service: http_status:404`のcatch-allで閉じる。本番ホスト
+(`nara-kosensai.com` / `www`)は、Origin Authentication移行が完了した時点でこの
+ConfigMapのingressエントリから削除済み(現在Tunnel経由で到達するのは`test`/`web-static`/
+`monitoring`配下のホストのみ)。
+
 = ネットワーク・セキュリティ
 
 == 公開ポート
@@ -319,15 +413,23 @@ Traefik Pod(namespace: `kube-system`)へ到達するが、Traefikの中では別
 VPSの公開インターフェースにbindされるポートは443/tcpのみ。80/tcpはTraefikの`web`
 entrypointがClusterIPのみで待ち受けており、ホストには一切bindされない。
 
-443/tcpへのアクセスは二重に制限している。
+443/tcpへのアクセス制限は、VPSプロバイダ側とホスト側で役割が異なる。
 
-+ *VPSプロバイダのセキュリティグループ*：Cloudflareが公開しているIPv4/IPv6レンジ
-  (`https://www.cloudflare.com/ips-v4`, `ips-v6`)のみ許可。
-+ *ホスト側nftables*(`k3s/cloudflare-ip-allowlist.sh`、@nft-rule)：同じCloudflare IPレンジ
-  を、raw prerouting段階でパケットの送信元インターフェース(`iifname`、デフォルトルートから
-  動的に解決)と組み合わせて判定する。マッチしない場合はTCPハンドシェイクにもTLSアラートにも
-  至らずサイレントにdropする。systemd timer(`cloudflare-ip-allowlist.timer`)が日次でレンジ
-  を再取得し、`manifest`リポジトリへのpush時にもCIが都度再実行する。
++ *VPSプロバイダのファイアウォール(セキュリティグループ)*：ポート単位の制限のみを行う
+  (443/tcpと管理用SSH以外を閉じる)。送信元IPアドレスによるフィルタリングは行っていない
+  ---つまりこの層だけでは、Cloudflare以外の任意のIPから443/tcpへ到達できてしまう。
++ *ホスト側nftables*(`k3s/cloudflare-ip-allowlist.sh`、@nft-rule)：送信元IPアドレスの
+  フィルタリングは、この層が唯一かつ全面的に担っている。Cloudflareが公開しているIPv4/IPv6
+  レンジ(`https://www.cloudflare.com/ips-v4`, `ips-v6`)を、raw prerouting段階でパケット
+  の送信元インターフェース(`iifname`、デフォルトルートから動的に解決)と組み合わせて判定する。
+  マッチしない場合はTCPハンドシェイクにもTLSアラートにも至らずサイレントにdropする。IPv4/IPv6
+  それぞれ独立したテーブル(`ip cloudflare_mtls` / `ip6 cloudflare_mtls6`)を持つ。systemd
+  timer(`cloudflare-ip-allowlist.timer`)が日次でレンジを再取得し、`manifest`リポジトリへの
+  push時にもCIが都度再実行する。
+
+したがって、Cloudflare IPアローリストの実体は完全にnftables側にある。このスクリプトが失敗
+した状態が長く続くと、VPSプロバイダ側のファイアウォールはそれを補ってくれない(運用マニュアル
+`operations.md`の「1. Cloudflare IPアローリストの更新不具合」を参照)。
 
 == TLS / mTLS
 
@@ -363,6 +465,14 @@ Prometheusとkube-state-metricsは、それぞれ専用のServiceAccountで動�
 `get`/`list`/`watch`のみを許可するClusterRoleを持つ(`k8s/base/monitoring/prometheus-rbac.yaml`、
 `kube-state-metrics.yaml`)。既定のServiceAccountには何の権限も付与しない。
 
+kube-state-metrics用ClusterRoleは`list`/`watch`のみだが、対象リソースには`secrets`が
+含まれる(Secret自体の値ではなく、存在・メタデータを可視化するため標準的に必要とされる範囲)。
+書き込み権限は一切付与していない。Prometheus用ClusterRoleはノード・Pod・Service・
+Endpointsの`get`/`list`/`watch`に加え、kube-apiserver/kubelet/cAdvisorのメトリクス
+エンドポイントにアクセスするためServiceAccountトークンをbearer tokenとして使う
+(`kubernetes_sd_configs`によるin-cluster discovery、TLS検証は`kubelet`ジョブのみ
+`insecure_skip_verify: true`で緩めている。単一ノード・単一テナント運用のため許容)。
+
 = シークレット管理
 
 Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在の方針を@secrets-table に示す。
@@ -393,6 +503,14 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
     [Grafana管理者パスワード等],
     [k8s Secret(`grafana-secrets`)\ ブートストラップ時に手動投入],
     [gitignore対象、\ 循環依存を避けるため],
+
+    [Cloudflare Tunnel\ (公開Web用)資格情報],
+    [k8s Secret(`cloudflared-credentials`、\ namespace: `network`)\ ブートストラップ時に手動投入],
+    [`cloudflared tunnel create`で生成される\ `credentials.json`は\ CLI操作でのみ得られる],
+
+    [GHCR pullトークン\ (`web-static` namespace用)],
+    [k8s Secret(`ghcr-pull`)\ ブートストラップ時に手動投入],
+    [`www-archive`/`storybook`/`form-preview`\ イメージがprivateなため],
   ),
   caption: [シークレットの保管場所と方針],
   kind: "hyo",
@@ -400,7 +518,15 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
 
 `manifest`リポジトリのCIが`prod.env` / `staging.env`をVPSの`/home/github/app-env/`に同期
 し、`2026kosensai`リポジトリのCIがそのパスを直接`--from-env-file`で参照する。このため
-`manifest`側のCIが`2026kosensai`側より先に一度動いている必要がある。
+`manifest`側のCIが`2026kosensai`側より先に一度動いている必要がある。同様に、`web-static`
+namespaceの`ghcr-pull` Secretは`manifest`側CIが適用する`k8s/overlays/shared`が
+Deploymentを作成する前提として存在している必要があり、これも一度きりの手動投入である。
+
+`prod`/`test` namespaceの`ghcr-pull`(2026kosensaiアプリのイメージpull用)は
+`2026kosensai`リポジトリのCI自身が、GitHub Environment Secret(`GHCR_PULL_TOKEN`)から
+デプロイの都度`kubectl create secret ... --dry-run=client -o yaml | kubectl apply -f -`で
+再生成する(こちらは一度きりの手動投入ではなくCI管理)。トークン期限切れ時の症状・対処は
+`operations.md`の「3. GHCR pullトークンの期限切れ・権限エラー(403)」を参照。
 
 = CI/CDパイプライン
 
@@ -418,12 +544,22 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
     ],
     [`2026kosensai` → `prod`],
     [
-      イメージbuild/push → GHCR pullトークン・Origin CA証明書をGitHub Secretsから取得 →
-      `kubectl apply -k infra/k8s/overlays/prod`(backend/frontend/website個別に
-      path-filter判定)→ rollout確認
+      backend/frontend/website/storybook全イメージを無条件でbuild/push(path-filterは
+      使わない)→ GHCR pullトークン・Origin CA証明書をGitHub Environment Secretsから
+      取得しSecretとして投入 → `kubectl apply -k infra/k8s/overlays/prod` → rollout確認
     ],
     [`2026kosensai` → `test`],
-    [同上(test namespace、pgAdmin用Cloudflare Accessは別途手動設定)],
+    [
+      変更検知(`dorny/paths-filter`でbackend/frontend/website差分を判定)→ 変更された
+      コンポーネントのみimage build/push → `kubectl apply -k infra/k8s/overlays/test/{app-dynamic,website}`
+      (変更分のみ)→ `.../test/ingress`は毎回無条件apply(軽量なため)→ rollout確認
+      (pgAdmin用Cloudflare Accessは別途手動設定)
+    ],
+    [`2026kosensai` → PR(任意ブランチ)],
+    [
+      `pr-check.yml`：Node側(pnpm + Turborepo)の`lint typecheck build`、Go側
+      (`app/backend`)の`go build` / `go test`。デプロイは行わない
+    ],
   ),
   caption: [CI/CDパイプライン一覧],
   kind: "hyo",
@@ -431,7 +567,18 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
 
 いずれもGitHub ActionsからVPSへは、管理用のCloudflare Access Tunnel(`cloudflared access tcp`)
 経由でSSH接続する。これは公開Web用のTunnel(namespace `network`のcloudflared)とは別物で、VPS
-側からのoutbound接続であるため、§3のnftables allowlistとは無関係に動作する。
+側からのoutbound接続であるため、§3のnftables allowlistとは無関係に動作する。SSH接続に使う
+`cloudflared`本体は、`manifest`/`2026kosensai`いずれのワークフローも、実行の都度GitHub
+Releases APIから最新バイナリをダウンロードし、リリースアセットのSHA-256ダイジェストと突き合わ
+せて検証してから使う(`deploy-test.yml`のみ`2026.7.2`にバージョン固定)。
+
+`2026kosensai`の`storybook`イメージは`deploy-prod.yml`がbuild/push(タグは`:latest`と
+コミットSHA)まで行うが、実際に`web-static` namespaceへ反映(`kubectl apply`)するのは
+`manifest`リポジトリ側のCIである。`storybook`はprod/test共有のsingletonであり、
+`2026kosensai`が管理するnamespace(`prod`/`test`)には属さないため。`manifest`側のCIは
+毎回`deployment/storybook`と`deployment/form-preview`を`rollout restart`してから
+`:latest`タグを再pullさせる(イメージダイジェストが変わってもタグ名は`:latest`のまま
+なのでrestartしないとPodが更新されない)。
 
 = 監視
 
@@ -449,6 +596,30 @@ Prometheus(namespace `monitoring`)は次をスクレイプする。
 Prometheus/Lokiデータソースは自動プロビジョニングしておらず、初回のみ手動追加が必要
 (`http://prometheus:9090`, `http://loki:3100`、いずれも`monitoring` namespace内)。ログは
 Grafana Alloy(DaemonSet、`k3s/alloy-logging.yaml`)が全namespaceのPodログをLokiへ出荷する。
+
+#figure(
+  table(
+    columns: (auto, auto, 1fr),
+    stroke: 0.5pt + gray,
+    inset: 8pt,
+    align: (left, left, left),
+    table.header([*コンポーネント*], [*Retain?*], [*備考*]),
+    [`prometheus`(10Gi)], [されない\ (`local-path`)], [メトリクスは再収集可能なため失っても許容],
+    [`loki`(10Gi)], [されない\ (`local-path`)], [`retention_period: 72h`(=3日)。ログも同様に許容],
+    [`grafana`(5Gi)], [*される*\ (`local-path-retain`)], [ダッシュボード定義・アノテーション等は\ 再構築コストが高い],
+  ),
+  caption: [監視コンポーネントのPVCとreclaimPolicy(§5「シークレット管理」で扱う\ `app`側のDB/backendも同じ`local-path-retain`を使う)],
+  kind: "hyo",
+) <monitoring-pvc-table>
+
+node-exporterは旧構成の`network_mode: host`相当を、DaemonSetに`hostNetwork: true` /
+`hostPID: true`と`/proc`, `/sys`, `/`のhostPathマウントを組み合わせて再現している(単一
+ノードだが、将来ノードが増えても自動的に追随する構成)。Grafanaは`GF_AUTH_GITHUB_ENABLED`
+によるGitHub OAuthログインを有効化しており、`GF_AUTH_GITHUB_ALLOWED_USERS`で許可した
+GitHubアカウントのみサインアップ・ログインできる(allow-list外のアカウントは弾かれる)。
+管理者パスワードとGitHub OAuthのクライアントシークレットは`grafana-secrets` Secret
+(@secrets-table)からのみ注入し、それ以外の非機微な設定はDeploymentマニフェストに直接
+書く。
 
 = 障害と設計判断
 
@@ -473,6 +644,28 @@ Helmインストール)がAPIサーバーに到達できず、インストール
 ナポートは8444番、Service公開は`expose.default: false`(hostPortのみ、Service経由の公開はそも
 そも不要)に変更して解消した。
 
+== VPS再起動によるホスト名変化とk3sノード名の固定(2026-08-28)
+
+VPSプロバイダ側のメンテナンスと思われるOS更新(カーネル`6.1.0-49-cloud-amd64` →
+`6.12.105+deb13-cloud-amd64`)を伴う再起動で、OSの静的ホスト名が`x162-43-87-201`から
+`kosensai`に変化した。k3sはデフォルトでノード名にOSホスト名をそのまま使うため、同じ物理
+マシンが*別のノード*として新規登録され、旧ノードオブジェクトは`NotReady`のまま残った。
+
+このクラスタは`local-path`(ノードローカルストレージ)を使っており、既存のPersistentVolume
+はすべて`nodeAffinity`で旧ノード名を固定的に参照していた(この`nodeAffinity`は作成後
+変更不可)。新ノード名はこのaffinityにマッチしないため、PVCを使う全Pod(`db`, `loki`,
+`grafana`, `prometheus`等)が新ノードにスケジュールできず`Pending`のまま止まり、CIの
+`rollout status`待ちがタイムアウトする形で表面化した。
+
+*対処*：9個のPVすべてを削除→再作成するのは本番データを巻き込むリスクが高いため、代わりに
+`/etc/systemd/system/k3s.service`の`ExecStart`に`--node-name x162-43-87-201`を追加し、
+*k3s側のノード名をOSホスト名から独立させて固定した*。以後OSホスト名が再び変わっても、
+k3sは常に同じノード名として登録されるため、既存PVの`nodeAffinity`と食い違わない。
+
+この事例は、シングルノードk3sでも「ノードの同一性」をOSホスト名任せにすると壊れうる、という
+運用上の教訓として設計判断に残す。応急処置・恒久対策の詳細な手順は`operations.md`
+「2. VPS再起動でホスト名が変わりk3sノードが二重化する」を参照。
+
 = リファレンス
 
 #figure(
@@ -482,14 +675,19 @@ Helmインストール)がAPIサーバーに到達できず、インストール
     inset: 8pt,
     align: (left, left),
     table.header([*項目*], [*値*]),
-    [Kubernetesディストリビューション], [k3s(シングルノード)],
+    [Kubernetesディストリビューション], [k3s(シングルノード、`--disable=servicelb`)],
+    [k3sノード名], [`x162-43-87-201`に固定(`--node-name`、OSホスト名から独立。§7参照)],
     [Ingressコントローラ], [Traefik 3.7(k3s同梱Helmチャート)],
     [CNI], [flannel(k3s標準)],
-    [ストレージ], [local-path(既定)、local-path-retain(データ保護が必要なPVC用)],
+    [ストレージ], [local-path(既定、reclaimPolicy: Delete)、\ local-path-retain(reclaimPolicy: Retain、DB/backend/grafana用)],
     [公開ポート], [443/tcpのみ(80/tcpはClusterIP限定で非公開)],
     [Traefik `websecure-mtls`], [containerPort 8444, hostPort 443, expose.default: false],
     [Traefik `web`], [containerPort 8000相当(chart既定), ClusterIP:80のみ],
     [管理用SSH], [Cloudflare Access Tunnel(公開Web用Tunnelとは別物、outbound-only)],
+    [Prometheus / Grafana / Loki], [`prom/prometheus:v2.51.0` / `grafana/grafana:11.0.0` / `grafana/loki:3.0.0`],
+    [node-exporter / kube-state-metrics], [`prom/node-exporter:v1.8.0` / `registry.k8s.io/kube-state-metrics:v2.13.0`],
+    [Loki保持期間], [`retention_period: 72h`(3日)],
+    [関連リポジトリ], [`nara-kosensai/manifest`(本リポジトリ、旧`config`)、\ `fumikun/2026kosensai`、`nara-kosensai/www`、\ `fumikun/kosensai-form-preview`],
   ),
   caption: [設定値リファレンス],
   kind: "hyo",
