@@ -47,6 +47,13 @@ data:
               ]
             action: keep
             regex: default;kubernetes;https
+        # apiserver_request_duration_seconds_bucket等のヒストグラムはverb×resource×
+        # code×component×バケット数の掛け算で系列が爆発的に増える最大要因。
+        # sum/count(平均値算出には十分)は残し、bucket(パーセンタイル計算用)だけ落とす。
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: '(apiserver|etcd)_.*_bucket'
+            action: drop
 
       # kubelet自体のメトリクス(node/kubelet単位の統計)。apiserver経由の
       # プロキシではなく、ノードのkubelet(10250番、単一ノードのため直接到達可)を
@@ -62,6 +69,12 @@ data:
         relabel_configs:
           - action: labelmap
             regex: __meta_kubernetes_node_label_(.+)
+        # kubeletが自身に埋め込んでいるclient-go計装(apiserverへのリクエスト状況、
+        # 内部workqueue統計)は普段見ないうえヒストグラムでコストが高いためdrop。
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: 'rest_client_.*|workqueue_.*|apiserver_.*_bucket|storage_operation_duration_seconds_bucket'
+            action: drop
 
       # cAdvisor(Pod/コンテナ単位のCPU/メモリ)。kubeletの/metrics/cadvisorを
       # 同様にrole: nodeで自動発見。
