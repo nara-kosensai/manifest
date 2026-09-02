@@ -154,11 +154,15 @@ table ip6 cloudflare_mtls6 {
 | `web-static` | `storybook.*` / `info-check.*` | www-archive(過去年度アーカイブ)・storybook・form-preview |
 | `monitoring` | `grafana.nara-kosensai.com` | grafana・loki・prometheus・node-exporter・kube-state-metrics |
 | `network` | --- | cloudflared(公開Web用Tunnel) |
+| `argocd` | `argocd.nara-kosensai.com` | ArgoCD本体(GitOpsコントローラ) |
 | `kube-system` | --- | Traefik(k3s同梱)・CoreDNS |
 
 *(表: namespace一覧)*
 
-管理元は`prod`/`test`が`2026kosensai`リポジトリのCI、それ以外が`manifest`リポジトリのCI。
+`prod`/`test`/`monitoring`/`network`/`web-static`の実際のマニフェストapplyはArgoCD
+(namespace: `argocd`)がgitを直接pullして行う。`argocd`自体のインストールと、各namespaceの
+作成・Secret投入(ArgoCDの管理対象外)は引き続き各リポジトリのpush-CIが担う
+(詳細は[CI/CDパイプライン](#cicdパイプライン)を参照)。
 `web-static`/`prod`/`test`のIngressRouteは、過去年度アーカイブ(`web-static` namespace)のService
 をcross-namespaceで参照する。単一テナント運用のクラスタであるため、Traefikの
 `providers.kubernetesCRD.allowCrossNamespace: true`を有効にしている。
@@ -253,6 +257,7 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
 | Grafana管理者パスワード等 | k8s Secret(`grafana-secrets`)ブートストラップ時に手動投入 | gitignore対象、循環依存を避けるため |
 | Cloudflare Tunnel(公開Web用)資格情報 | k8s Secret(`cloudflared-credentials`、namespace: `network`)ブートストラップ時に手動投入 | `cloudflared tunnel create`で生成される`credentials.json`はCLI操作でのみ得られる |
 | GHCR pullトークン(`web-static` namespace用) | k8s Secret(`ghcr-pull`)ブートストラップ時に手動投入 | `www-archive`/`storybook`/`form-preview`イメージがprivateなため |
+| ArgoCD用GitHub Deploy Key(`manifest`/`2026kosensai`各リポジトリ) | k8s Secret(`argocd`namespace、`argocd.argoproj.io/secret-type: repository`ラベル)ブートストラップ時に手動投入 | ArgoCDがprivateリポジトリを読み取り専用でpullするため |
 
 *(表: シークレットの保管場所と方針)*
 
@@ -264,13 +269,34 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
 
 ## CI/CDパイプライン
 
+2026年9月にpush型(CIが直接`kubectl apply`)からArgoCDによるpull型GitOpsへ移行した。
+マニフェスト本体のapplyはすべてArgoCDが担い、各リポジトリのpush-CIは「ArgoCDのスコープ外の
+もの(ArgoCD自体のインストール、namespace作成、Secret投入)の同期」と「イメージbuild/push +
+マニフェストのイメージタグ更新をgitにcommit&push」だけを行う。
+
 | リポジトリ / ブランチ | 処理内容 |
 | --- | --- |
-| `manifest` → `main` | k3sブートストラップマニフェスト再配置 → Cloudflare IP allowlist再実行 → `kubectl apply -k k8s/overlays/shared` → 各Deploymentのrollout確認 |
-| `2026kosensai` → `prod` | イメージbuild/push → GHCR pullトークン・Origin CA証明書をGitHub Secretsから取得 → `kubectl apply -k infra/k8s/overlays/prod`(backend/frontend/website個別にpath-filter判定)→ rollout確認 |
-| `2026kosensai` → `test` | 同上(test namespace、pgAdmin用Cloudflare Accessは別途手動設定) |
+| `manifest` → `main` | k3sブートストラップマニフェスト再配置 → Cloudflare IP allowlist再実行 → `k8s/`をVPSへrsync(ArgoCDが直接gitからpullするためapplyはしない)→ ArgoCD自体を`kubectl apply -k k8s/bootstrap/argocd` |
+| `2026kosensai` → `prod` | イメージbuild/push → `kustomize edit set image`でoverlayのタグ更新 → **そのままprodブランチにcommit&push**(`[skip ci]`)→ namespace作成・GHCR pullトークン/Origin CA証明書由来のSecret投入 |
+| `2026kosensai` → `test` | 同上(test namespace) |
 
 *(表: CI/CDパイプライン一覧)*
+
+ArgoCD(namespace: `argocd`、`argocd.nara-kosensai.com`でCloudflare Tunnel + Access経由公開)は
+`manifest`リポジトリの`k8s/argocd-apps/`が定義するApplication(App-of-apps、`root-app`)を
+通じて、以下をgitから直接pullし`automated`(prune+selfHeal)でsyncする。
+
+| Application | source repo / path | 対象 |
+| --- | --- | --- |
+| `platform-shared` | `manifest` / `k8s/overlays/shared` | monitoring/network/web-static/ingress |
+| `app-prod` / `app-test` | `2026kosensai` (`prod`/`test`ブランチ) / `infra/k8s/overlays/{prod,test}/app-dynamic` | backend/frontend/db/pgadmin |
+| `website-prod` / `website-test` | 同上 / `.../website` | website |
+| `ingress-prod` / `ingress-test` | 同上 / `.../ingress` | IngressRoute/Middleware |
+
+各リポジトリへの読み取りアクセスはリポジトリ単位のSSH Deploy Keyで行う(`argocd`namespace内に
+`argocd.argoproj.io/secret-type: repository`ラベル付きSecretとして登録、README.md参照)。
+CIは`git push`後のArgoCDの実際のsync/rollout成否を待たない点に注意
+(現状はArgoCD UI/通知で監視する運用、CI失敗としては検知しない)。
 
 いずれもGitHub ActionsからVPSへは、管理用のCloudflare Access Tunnel(`cloudflared access tcp`)
 経由でSSH接続する。これは公開Web用のTunnel(namespace `network`のcloudflared)とは別物で、VPS
@@ -314,6 +340,31 @@ Helmインストール)がAPIサーバーに到達できず、インストール
 (`websecure-mtls`をchartのデフォルト`websecure`と同じ8443番/443番で定義していたため)。コンテ
 ナポートは8444番、Service公開は`expose.default: false`(hostPortのみ、Service経由の公開はそも
 そも不要)に変更して解消した。
+
+### push型CIからArgoCD(GitOps)への移行(2026-09-02)
+
+デプロイをCIから直接`kubectl apply`するpush型から、ArgoCDがgitを直接pullしてapplyするpull型
+(GitOps)へ移行した。狙いは主に2点: (1) VPS上の実際の状態とgitの内容が乖離した場合に
+`selfHeal`で自動的に検知・是正できるようにする、(2) 各リポジトリのCIから
+`rsync`+`kubectl apply`+複数の`rollout status`待ちという長い手続きを排除し、CIの責務を
+「イメージbuild/push + マニフェストのタグ更新をgitに反映する」ことだけに縮小する。
+
+**ArgoCD自体はGitOps管理の対象外とした**(`k8s/bootstrap/argocd/`、push-CIが恒久的に適用)。
+理由は、ArgoCDの管理対象にArgoCD自身を含めると、ArgoCDが何らかの理由で壊れた場合に
+ArgoCD自身を使った復旧ができなくなるため(chicken-and-egg問題)。これは既存の`k3s/`
+ブートストラップ層(k3s本体・Traefik設定など)がpush-CI管理のまま残っている設計判断と同じ理由
+による。
+
+Secret類(`app-env`, `ghcr-pull`, `grafana-secrets`, `cloudflared-credentials`,
+`cloudflare-origin-cert`)はこれまで通りgitにコミットせずkustomizeの`resources`にも含めない
+運用を維持した。ArgoCDの管理対象は各kustomize baseのresourcesに列挙されたものだけなので、
+これらのSecretはArgoCDの`selfHeal`によるprune対象にもならず、CIが引き続き
+`kubectl create secret ... --dry-run=client -o yaml | kubectl apply -f -`で投入する。
+
+**既知のトレードオフ**: CIは`git push`後、ArgoCDによる実際のsync/rolloutの成否を待たない
+(移行前は`kubectl rollout status`でCIジョブ自体が失敗検知していた)。現状はArgoCD UI/通知での
+監視に委ねている。将来的に`argocd app wait`をCloudflare Access Tunnel経由でCIから呼ぶ形に
+拡張し、CIでの失敗検知を復元する余地がある(未実装)。
 
 ## リファレンス
 

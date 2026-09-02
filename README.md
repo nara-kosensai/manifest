@@ -53,16 +53,49 @@ config/
   していないため、初回は手動で追加が必要
   (`http://prometheus:9090`, `http://loki:3100`、いずれも`monitoring` namespace内)。
 - `k8s/overlays/shared/` — 上記すべてを対応するnamespaceにまとめて適用する。
+  実際のapplyはこのリポジトリのCIではなくArgoCD(`platform-shared` Application)が
+  gitから直接pullして行う(下記「ArgoCD(GitOps)」節を参照)。
+- `k8s/bootstrap/argocd/` — ArgoCD本体のインストール(namespace, upstream install
+  manifest, `argocd-cm`/`argocd-cmd-params-cm`パッチ, `argocd.nara-kosensai.com`への
+  IngressRoute)。`k3s/`同様、ArgoCDに委譲せずこのリポジトリのCIが恒久的に適用する
+  (ArgoCDが壊れた場合にArgoCD自身では直せなくなるchicken-and-egg問題を避けるため)。
+- `k8s/argocd-apps/` — ArgoCDが管理するApplication定義(App-of-apps)。`root-app.yaml`
+  だけを一度きり手動でapplyすれば、以降はこのディレクトリ自体もgit経由でArgoCDが
+  管理する。
+
+## ArgoCD(GitOps)
+
+2026年9月にpush型CI(`kubectl apply`)からArgoCDによるpull型GitOpsへ移行した。
+
+- `config`(共有基盤)・`2026kosensai`(アプリ本体prod/test)いずれも、マニフェスト本体の
+  applyはArgoCDがそれぞれのリポジトリを直接git pullして行う。
+- 各リポジトリのCIは「namespace作成・Secret投入(ArgoCDの管理対象外)」と、
+  `2026kosensai`側では追加で「イメージbuild/push後、`kustomize edit set image`で
+  書き換えたマニフェストのタグをgitにcommit&push」だけを行う。`kubectl apply`や
+  `rollout status`待ちはCIから削除済み(ArgoCDのUI/通知で確認する)。
+- ArgoCD UIは`https://argocd.nara-kosensai.com`でCloudflare Tunnel + Access経由公開。
+- 各Applicationの定義は`k8s/argocd-apps/`を参照。
+
+**新しいApplicationやリポジトリを追加する場合の注意**：Applicationは初回、
+`syncPolicy.automated`を付けずに(手動sync)作成し、`argocd app diff <name>`で
+「差分なし」であることを確認してから`automated`(prune+selfHeal)に変更すること。
+既に本番で稼働中のリソースに対して、gitとの差分がある状態でいきなり自動syncを
+有効にすると意図しないロールバック/再作成が起きうる。
 
 ## namespace
 
-| namespace | 内容 | 管理元 |
-| --- | --- | --- |
-| `prod` / `test` | 2026kosensaiアプリ本体 | `2026kosensai`リポジトリのCI |
-| `web-static` | 過去年度アーカイブ, storybook, form-preview(singleton) | `config`のCI |
-| `network` | cloudflared(singleton) | `config`のCI |
-| `monitoring` | Loki, Grafana, Prometheus, node-exporter | `config`のCI |
-| `kube-system` | k3s同梱Traefik(ClusterIPのみ、公開ポートなし) | `k3s/`ブートストラップ |
+| namespace | 内容 | マニフェストの出所 | 管理元 |
+| --- | --- | --- | --- |
+| `prod` / `test` | 2026kosensaiアプリ本体 | `2026kosensai`リポジトリ | ArgoCD(`app-*`/`website-*`/`ingress-*` Application) |
+| `web-static` | 過去年度アーカイブ, storybook, form-preview(singleton) | `config`リポジトリ | ArgoCD(`platform-shared` Application) |
+| `network` | cloudflared(singleton) | `config`リポジトリ | ArgoCD(`platform-shared` Application) |
+| `monitoring` | Loki, Grafana, Prometheus, node-exporter | `config`リポジトリ | ArgoCD(`platform-shared` Application) |
+| `argocd` | ArgoCD本体(GitOpsコントローラ) | `config`リポジトリ(`k8s/bootstrap/argocd/`) | `config`のCI(push-CI、恒久) |
+| `kube-system` | k3s同梱Traefik(ClusterIPのみ、公開ポートなし) | `config`リポジトリ(`k3s/`) | `k3s/`ブートストラップ(push-CI、恒久) |
+
+namespace自体の作成・ArgoCDの管理対象外のSecret(app-env/ghcr-pull/grafana-secrets/
+cloudflared-credentials/cloudflare-origin-cert)の投入は、引き続き各リポジトリのCIが
+SSH経由で行う。
 
 過去にInfisicalを`infisical` namespaceで運用していたが廃止した(秘密情報は
 下記の通り`app-env`のgitコミットとGitHub Secretsに移行した)。VPS上に
@@ -193,6 +226,7 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
    cloudflared tunnel route dns nara-kosensai-web pgadmin-test.nara-kosensai.com
    cloudflared tunnel route dns nara-kosensai-web grafana.nara-kosensai.com
    cloudflared tunnel route dns nara-kosensai-web info-check.nara-kosensai.com
+   cloudflared tunnel route dns nara-kosensai-web argocd.nara-kosensai.com
    ```
    生成される `credentials.json` を、VPS上で直接k8s Secretとして投入する:
    ```
@@ -227,23 +261,61 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
 7. **2026kosensaiリポジトリの`production-vps`/`test-vps` environmentに
    `GHCR_PULL_TOKEN`(read:packages スコープのPAT)をGitHub Environment Secretとして
    追加**(prod/test namespace用のimagePullSecret。Infisicalは経由しない)。
+8. **ArgoCD自体をインストール**: 手順1〜7を終えた状態で`config`リポジトリの`main`への
+   pushでCIが`k8s/bootstrap/argocd`を適用し、ArgoCD本体が立ち上がる
+   (`kubectl -n argocd get pods`で確認)。
+9. **GitHubリポジトリへの読み取り用SSH Deploy Keyを発行**: `config`(`nara-kosensai/manifest`)
+   と`2026kosensai`それぞれのリポジトリ設定 `Settings > Deploy keys` で読み取り専用
+   (Write access不要)のDeploy Keyを追加し、対応する秘密鍵をArgoCDに登録する:
+   ```
+   kubectl -n argocd create secret generic manifest-repo \
+     --from-literal=type=git \
+     --from-literal=url=git@github.com:nara-kosensai/manifest.git \
+     --from-file=sshPrivateKey=<manifest用秘密鍵のパス>
+   kubectl -n argocd label secret manifest-repo argocd.argoproj.io/secret-type=repository
+
+   kubectl -n argocd create secret generic 2026kosensai-repo \
+     --from-literal=type=git \
+     --from-literal=url=git@github.com:fumikun/2026kosensai.git \
+     --from-file=sshPrivateKey=<2026kosensai用秘密鍵のパス>
+   kubectl -n argocd label secret 2026kosensai-repo argocd.argoproj.io/secret-type=repository
+   ```
+10. **ArgoCDのApp-of-appsをブートストラップ**: `root-app.yaml`だけを一度きり手動でapplyする
+    (以降はこのファイル自体もgit経由でArgoCDが管理する)。
+    ```
+    kubectl apply -f k8s/argocd-apps/root-app.yaml
+    ```
+    続けて`platform-shared`をはじめ各Applicationが`argocd`namespaceに現れる
+    (`kubectl -n argocd get applications`)。**本番影響を避けるため、`kubectl apply`直後は
+    各Applicationで`argocd app diff <name>`を実行し、gitとVPS上の実際の状態に差分がないことを
+    確認してから運用を続けること**(差分がある場合、意図しないリソースの再作成/削除が
+    起きうる)。
+11. **ArgoCD UI用のCloudflare Accessポリシー**: `argocd.nara-kosensai.com`に対して
+    Cloudflareダッシュボード側でAccessアプリケーション(認証ポリシー、pgAdminと同様の設定)を
+    追加する。ArgoCDの初期adminパスワードは`kubectl -n argocd get secret
+    argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`で取得できる
+    (初回ログイン後、ローテーション/削除を推奨)。
 
 これ以降、共有プラットフォーム設定は `config` への push (`main`ブランチ) で、
 アプリ本体は `2026kosensai` の `prod`/`test` ブランチへのpushで、それぞれ独立に
-コードから再現・更新される。
+コードから再現・更新される。ただし実際のマニフェストapplyはArgoCDが担うため、
+CIのpush自体はgitの内容を更新するだけであり、反映確認はArgoCD UI/CLIで行う。
 
 ## 動作確認
 
 ```sh
 kubectl kustomize k8s/overlays/shared      # レンダリング確認
 kubectl apply --dry-run=server -k k8s/overlays/shared
+kubectl kustomize k8s/bootstrap/argocd     # ArgoCD自体のレンダリング確認
 ```
 
 適用後:
 - `kubectl get svc -n kube-system traefik` で `TYPE=ClusterIP` になっていること
   (公開ポートを一切bindしていないこと)。
-- `curl -I https://grafana.nara-kosensai.com/`, `https://storybook.nara-kosensai.com/`
-  が200/302で応答すること。
+- `curl -I https://grafana.nara-kosensai.com/`, `https://storybook.nara-kosensai.com/`,
+  `https://argocd.nara-kosensai.com/`(Cloudflare Access認証後)が200/302で応答すること。
+- `kubectl -n argocd get applications` で全Applicationが`Sync Status: Synced`,
+  `Health: Healthy`になっていること。
 - GrafanaでLoki/Prometheusのデータソードが有効で、各namespaceのPodログ・
   node-exporter/Traefikメトリクスが見えること。
 - `nft list table ip cloudflare_mtls` / `nft list table ip6 cloudflare_mtls6`

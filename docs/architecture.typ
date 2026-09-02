@@ -340,16 +340,19 @@ timer実行(最大24時間+ランダム遅延)までdropルールが存在しな
     [`web-static`], [`storybook.*` / `info-check.*`], [www-archive(過去年度アーカイブ)・storybook・form-preview],
     [`monitoring`], [`grafana.nara-kosensai.com`], [grafana・loki・prometheus・node-exporter・kube-state-metrics],
     [`network`], [---], [cloudflared(公開Web用Tunnel)],
+    [`argocd`], [`argocd.nara-kosensai.com`], [ArgoCD本体(GitOpsコントローラ)],
     [`kube-system`], [---], [Traefik(k3s同梱)・CoreDNS],
   ),
   caption: [namespace一覧],
   kind: "hyo",
 ) <ns-table>
 
-管理元は`prod`/`test`が`2026kosensai`リポジトリのCI、それ以外が`manifest`リポジトリのCI。
-`web-static`/`prod`/`test`のIngressRouteは、過去年度アーカイブ(`web-static` namespace)のService
-をcross-namespaceで参照する。単一テナント運用のクラスタであるため、Traefikの
-`providers.kubernetesCRD.allowCrossNamespace: true`を有効にしている。
+`prod`/`test`/`monitoring`/`network`/`web-static`の実際のマニフェストapplyはArgoCD
+(namespace: `argocd`)がgitを直接pullして行う。`argocd`自体のインストールと、各namespaceの
+作成・Secret投入(ArgoCDの管理対象外)は引き続き各リポジトリのpush-CIが担う
+(詳細は@cicd-table を参照)。`web-static`/`prod`/`test`のIngressRouteは、過去年度アーカイブ
+(`web-static` namespace)のServiceをcross-namespaceで参照する。単一テナント運用のクラスタ
+であるため、Traefikの`providers.kubernetesCRD.allowCrossNamespace: true`を有効にしている。
 
 == Ingressルーティング(旧nginxからの移植)
 
@@ -511,6 +514,10 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
     [GHCR pullトークン\ (`web-static` namespace用)],
     [k8s Secret(`ghcr-pull`)\ ブートストラップ時に手動投入],
     [`www-archive`/`storybook`/`form-preview`\ イメージがprivateなため],
+
+    [ArgoCD用GitHub Deploy Key\ (`manifest`/`2026kosensai`各リポジトリ)],
+    [k8s Secret(`argocd`namespace、\ `argocd.argoproj.io/secret-type: repository`\ ラベル)ブートストラップ時に手動投入],
+    [ArgoCDがprivateリポジトリを\ 読み取り専用でpullするため],
   ),
   caption: [シークレットの保管場所と方針],
   kind: "hyo",
@@ -530,6 +537,11 @@ Deploymentを作成する前提として存在している必要があり、こ�
 
 = CI/CDパイプライン
 
+2026年9月にpush型(CIが直接`kubectl apply`)からArgoCDによるpull型GitOpsへ移行した。
+マニフェスト本体のapplyはすべてArgoCDが担い、各リポジトリのpush-CIは「ArgoCDのスコープ外の
+もの(ArgoCD自体のインストール、namespace作成、Secret投入)の同期」と「イメージbuild/push +
+マニフェストのイメージタグ更新をgitにcommit&push」だけを行う。
+
 #figure(
   table(
     columns: (auto, 1fr),
@@ -540,20 +552,22 @@ Deploymentを作成する前提として存在している必要があり、こ�
     [`manifest` → `main`],
     [
       k3sブートストラップマニフェスト再配置 → Cloudflare IP allowlist再実行 →
-      `kubectl apply -k k8s/overlays/shared` → 各Deploymentのrollout確認
+      `k8s/`をVPSへrsync(ArgoCDが直接gitからpullするためapplyはしない)→
+      ArgoCD自体を`kubectl apply -k k8s/bootstrap/argocd`
     ],
     [`2026kosensai` → `prod`],
     [
       backend/frontend/website/storybook全イメージを無条件でbuild/push(path-filterは
-      使わない)→ GHCR pullトークン・Origin CA証明書をGitHub Environment Secretsから
-      取得しSecretとして投入 → `kubectl apply -k infra/k8s/overlays/prod` → rollout確認
+      使わない)→ `kustomize edit set image`でoverlayのタグ更新 → そのまま`prod`
+      ブランチにcommit&push(`[skip ci]`)→ namespace作成・GHCR pullトークン/Origin CA
+      証明書由来のSecret投入
     ],
     [`2026kosensai` → `test`],
     [
       変更検知(`dorny/paths-filter`でbackend/frontend/website差分を判定)→ 変更された
-      コンポーネントのみimage build/push → `kubectl apply -k infra/k8s/overlays/test/{app-dynamic,website}`
-      (変更分のみ)→ `.../test/ingress`は毎回無条件apply(軽量なため)→ rollout確認
-      (pgAdmin用Cloudflare Accessは別途手動設定)
+      コンポーネントのみimage build/push → 変更分のみ`kustomize edit set image`でタグ更新 →
+      そのまま`test`ブランチにcommit&push(`[skip ci]`)→ namespace作成・GHCR pullトークン
+      由来のSecret投入(pgAdmin用Cloudflare Accessは別途手動設定)
     ],
     [`2026kosensai` → PR(任意ブランチ)],
     [
@@ -564,6 +578,31 @@ Deploymentを作成する前提として存在している必要があり、こ�
   caption: [CI/CDパイプライン一覧],
   kind: "hyo",
 ) <cicd-table>
+
+ArgoCD(namespace: `argocd`、`argocd.nara-kosensai.com`でCloudflare Tunnel + Access経由公開)は
+`manifest`リポジトリの`k8s/argocd-apps/`が定義するApplication(App-of-apps、`root-app`)を
+通じて、以下をgitから直接pullし`automated`(prune+selfHeal)でsyncする。
+
+#figure(
+  table(
+    columns: (auto, 1fr, 1fr),
+    stroke: 0.5pt + gray,
+    inset: 8pt,
+    align: (left, left, left),
+    table.header([*Application*], [*source repo / path*], [*対象*]),
+    [`platform-shared`], [`manifest` / `k8s/overlays/shared`], [monitoring/network/web-static/ingress],
+    [`app-prod` / `app-test`], [`2026kosensai`(`prod`/`test`) / `infra/k8s/overlays/{prod,test}/app-dynamic`], [backend/frontend/db/pgadmin],
+    [`website-prod` / `website-test`], [同上 / `.../website`], [website],
+    [`ingress-prod` / `ingress-test`], [同上 / `.../ingress`], [IngressRoute/Middleware],
+  ),
+  caption: [ArgoCD Application一覧],
+  kind: "hyo",
+) <argocd-apps-table>
+
+各リポジトリへの読み取りアクセスはリポジトリ単位のSSH Deploy Keyで行う(`argocd`namespace内に
+`argocd.argoproj.io/secret-type: repository`ラベル付きSecretとして登録、README.md参照)。
+CIは`git push`後のArgoCDの実際のsync/rollout成否を待たない点に注意
+(現状はArgoCD UI/通知で監視する運用、CI失敗としては検知しない)。
 
 いずれもGitHub ActionsからVPSへは、管理用のCloudflare Access Tunnel(`cloudflared access tcp`)
 経由でSSH接続する。これは公開Web用のTunnel(namespace `network`のcloudflared)とは別物で、VPS
@@ -661,6 +700,30 @@ VPSプロバイダ側のメンテナンスと思われるOS更新(カーネル`6
 `/etc/systemd/system/k3s.service`の`ExecStart`に`--node-name x162-43-87-201`を追加し、
 *k3s側のノード名をOSホスト名から独立させて固定した*。以後OSホスト名が再び変わっても、
 k3sは常に同じノード名として登録されるため、既存PVの`nodeAffinity`と食い違わない。
+
+== push型CIからArgoCD(GitOps)への移行(2026-09-02)
+
+デプロイをCIから直接`kubectl apply`するpush型から、ArgoCDがgitを直接pullしてapplyするpull型
+(GitOps)へ移行した。狙いは主に2点：(1) VPS上の実際の状態とgitの内容が乖離した場合に
+`selfHeal`で自動的に検知・是正できるようにする、(2) 各リポジトリのCIから`rsync`+
+`kubectl apply`+複数の`rollout status`待ちという長い手続きを排除し、CIの責務を「イメージ
+build/push + マニフェストのタグ更新をgitに反映する」ことだけに縮小する。
+
+*ArgoCD自体はGitOps管理の対象外とした*(`k8s/bootstrap/argocd/`、push-CIが恒久的に適用)。
+理由は、ArgoCDの管理対象にArgoCD自身を含めると、ArgoCDが何らかの理由で壊れた場合にArgoCD
+自身を使った復旧ができなくなるため(chicken-and-egg問題)。これは既存の`k3s/`ブートストラップ
+層(k3s本体・Traefik設定など)がpush-CI管理のまま残っている設計判断と同じ理由による。
+
+Secret類(`app-env`, `ghcr-pull`, `grafana-secrets`, `cloudflared-credentials`,
+`cloudflare-origin-cert`)はこれまで通りgitにコミットせずkustomizeの`resources`にも含めない
+運用を維持した。ArgoCDの管理対象は各kustomize baseのresourcesに列挙されたものだけなので、
+これらのSecretはArgoCDの`selfHeal`によるprune対象にもならず、CIが引き続き
+`kubectl create secret ... --dry-run=client -o yaml | kubectl apply -f -`で投入する。
+
+*既知のトレードオフ*：CIは`git push`後、ArgoCDによる実際のsync/rolloutの成否を待たない
+(移行前は`kubectl rollout status`でCIジョブ自体が失敗検知していた)。現状はArgoCD UI/通知での
+監視に委ねている。将来的に`argocd app wait`をCloudflare Access Tunnel経由でCIから呼ぶ形に
+拡張し、CIでの失敗検知を復元する余地がある(未実装)。
 
 この事例は、シングルノードk3sでも「ノードの同一性」をOSホスト名任せにすると壊れうる、という
 運用上の教訓として設計判断に残す。応急処置・恒久対策の詳細な手順は`operations.md`

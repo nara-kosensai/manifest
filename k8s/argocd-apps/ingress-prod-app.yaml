@@ -1,0 +1,23 @@
+# prod namespaceのIngressRoute/Middleware。イメージビルドを伴わず軽量なので
+# CIの変更検知ロジックとは無関係に常にgit状態と一致させる(ArgoCDのselfHealで担保)。
+# cloudflare-origin-cert TLS Secretは引き続きCIがSSH経由で作成する。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:fumikun/2026kosensai.git
+    targetRevision: prod
+    path: infra/k8s/overlays/prod/ingress
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

@@ -116,26 +116,21 @@ jobs:
             sudo systemctl enable --now cloudflare-ip-allowlist.timer && \
             sudo /usr/local/sbin/cloudflare-ip-allowlist.sh"
 
-      - name: Sync shared k8s manifests and apply
-        env:
-          KUBECTL: "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl"
+      # k8s/overlays/shared(monitoring/network/web-static/ingress)の実際の適用は
+      # ArgoCD(platform-shared Application, k8s/argocd-apps/)がgitのこのリポジトリを
+      # 直接pullして担う。このCIはリポジトリの中身をVPSへ同期するだけで、
+      # kubectl applyやrollout待ちは行わない(ArgoCDのUI/通知で確認する)。
+      - name: Sync shared k8s manifests to VPS
         run: |
           ssh vps "mkdir -p /home/github/k8s-shared"
           rsync -az --delete --no-times --no-perms k8s/ vps:/home/github/k8s-shared/
-          ssh vps "$KUBECTL apply -k /home/github/k8s-shared/overlays/shared"
 
-          # ConfigMapの更新をPodに反映させるためcloudflaredをローリング再起動する
-          ssh vps "$KUBECTL -n network rollout restart deployment/cloudflared"
-          ssh vps "$KUBECTL -n network rollout status deployment/cloudflared --timeout=120s"
-          ssh vps "$KUBECTL -n monitoring rollout status deployment/loki --timeout=120s"
-          ssh vps "$KUBECTL -n monitoring rollout status deployment/grafana --timeout=120s"
-          ssh vps "$KUBECTL -n monitoring rollout status deployment/prometheus --timeout=120s"
-          ssh vps "$KUBECTL -n web-static rollout status deployment/www-archive --timeout=120s"
-          ssh vps "$KUBECTL -n web-static rollout status deployment/storybook --timeout=120s"
-          ssh vps "$KUBECTL -n web-static rollout restart deployment/form-preview"
-          ssh vps "$KUBECTL -n web-static rollout status deployment/form-preview --timeout=120s" || {
-            echo "::error::form-preview rollout failed, dumping pod description:"
-            ssh vps "$KUBECTL -n web-static describe pod -l app=form-preview"
-            exit 1
-          }
+      # ArgoCD自体のインストールはk3s/同様、ArgoCDに委譲せずこのCIが恒久的に適用する
+      # (ArgoCDが壊れた場合にArgoCD自身では直せなくなるchicken-and-egg問題を避けるため)。
+      - name: Apply ArgoCD bootstrap manifests
+        env:
+          KUBECTL: "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl"
+        run: |
+          ssh vps "$KUBECTL apply -k /home/github/k8s-shared/bootstrap/argocd"
+          ssh vps "$KUBECTL -n argocd rollout status deployment/argocd-server --timeout=180s"
           

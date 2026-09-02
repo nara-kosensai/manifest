@@ -14,6 +14,7 @@ VPSへの接続方法・namespace構成・シークレット管理方針の前�
 2. [VPS再起動でホスト名が変わりk3sノードが二重化する](#2-vps再起動でホスト名が変わりk3sノードが二重化する)
 3. [GHCR pullトークンの期限切れ・権限エラー(403)](#3-ghcr-pullトークンの期限切れ権限エラー403)
 4. [rolloutタイムアウトの一般的な切り分け手順](#4-rolloutタイムアウトの一般的な切り分け手順)
+5. [ArgoCDがOutOfSync/Degradedのまま進まない](#5-argocdがoutofsyncdegradedのまま進まない)
 
 ## 1. Cloudflare IPアローリストの更新不具合
 
@@ -251,4 +252,61 @@ kubectl describe node <node>   # Conditions / Events を確認
 [§2](#2-vps再起動でホスト名が変わりk3sノードが二重化する)、"ImagePullBackOff"かつ`403`が
 出ていれば[§3](#3-ghcr-pullトークンの期限切れ権限エラー403)を参照。原因不明のタイムアウトが
 本番ホストでのみ発生する場合は、Cloudflare側の522/524エラーコードと合わせて
-[§1](#1-cloudflare-ipアローリストの更新不具合)も疑うこと。
+[§1](#1-cloudflare-ipアローリストの更新不具合)も疑うこと。CIの`rollout status`待ちは廃止済み
+(2026-09-02のArgoCD移行以降)なので、CIログにこのステップが無いのは正常。デプロイの成否は
+[§5](#5-argocdがoutofsyncdegradedのまま進まない)の通りArgoCD側で確認する。
+
+## 5. ArgoCDがOutOfSync/Degradedのまま進まない
+
+### 何が起きるか
+
+ArgoCD移行(2026-09-02)以降、各リポジトリのCIは`kustomize edit set image`でマニフェストの
+イメージタグを書き換えてgitにcommit&pushするところまでしか行わない([architecture.md#cicdパイプライン](architecture.md#cicdパイプライン)参照)。実際のPodロールアウトはArgoCDが
+非同期に行うため、**CIが成功していても実際のデプロイが失敗している(Degraded)ことがCIログ
+からは分からない**。CIの`rollout status`待ちに相当する失敗検知は現状ArgoCD側にしかない。
+
+典型的な症状:
+
+- `Sync Status: OutOfSync`のまま`Synced`に進まない → git上のマニフェストが何らかの理由で
+  クラスタに反映できていない(構文エラー、対象namespaceが存在しない、RBAC不足等)。
+- `Health Status: Degraded` / `Progressing`のまま進まない → applyには成功したが、Pod自体が
+  `CrashLoopBackOff`/`ImagePullBackOff`等で起動できていない(実体は[§4](#4-rolloutタイムアウトの一般的な切り分け手順)と同じ)。
+- Applicationが存在しない/`Unknown`のまま → `root-app`自体がsyncされていない、または
+  対象リポジトリへのDeploy Key認証が失敗している。
+
+### 診断
+
+```bash
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n argocd get applications
+# SYNC STATUS / HEALTH STATUS 列を確認
+
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n argocd describe application <app-name>
+# Conditions / Events に具体的なエラーメッセージが出る
+# (例: "rpc error: ... authentication required" ならDeploy Keyの認証失敗、
+#  "no matches for kind" ならCRD不足、等)
+
+# ArgoCD自体の各コンポーネントの状態
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n argocd get pods
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n argocd logs deployment/argocd-repo-server --tail=100
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n argocd logs deployment/argocd-application-controller --tail=100
+
+# Deploy Keyの登録状態(Secretの存在とラベルのみ確認、鍵の値は表示しない)
+KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n argocd get secrets \
+  -l argocd.argoproj.io/secret-type=repository
+```
+
+`Health Status: Degraded`でPod自体に問題がある場合は、[§4](#4-rolloutタイムアウトの一般的な切り分け手順)の`kubectl describe pod` / `kubectl logs --previous`の手順にそのまま進む。
+
+### 対処
+
+- **認証エラー(Deploy Key)**: GitHub側でDeploy Keyが削除/失効していないか確認し、
+  必要なら再発行して`argocd`namespaceのSecretを作り直す(README.mdの手順9参照)。
+- **manifest側の構文/RBACエラー**: 該当リポジトリでのローカル`kubectl kustomize <path>`
+  レンダリング確認(動作確認節参照)で問題を再現・修正し、修正をpushすれば自動的に
+  再sync/selfHealされる。
+- **手動での即時再sync**: 通常は`selfHeal`により自動的に再試行されるが、即座に反映したい
+  場合はArgoCD UI(`https://argocd.nara-kosensai.com`)またはCLIから`Sync`を手動実行できる。
+- **CI自体は成功しているのにデプロイが反映されない**: CIの「Commit and push updated image
+  tags」ステップが実際にpushできているか確認する(`git push`が失敗していないか、
+  `permissions.contents: write`が外れていないか)。pushが失敗している場合、当然ArgoCDは
+  古いタグのままにとどまる。

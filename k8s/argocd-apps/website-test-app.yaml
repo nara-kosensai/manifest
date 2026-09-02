@@ -1,0 +1,21 @@
+# website(test)。website-prod-app.yamlと同様、targetRevisionのみtest。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: website-test
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:fumikun/2026kosensai.git
+    targetRevision: test
+    path: infra/k8s/overlays/test/website
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: test
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

@@ -1,0 +1,24 @@
+# backend/frontend/db/pgadmin(prod)。イメージタグは2026kosensaiのCI(deploy-prod.yml)が
+# `kustomize edit set image` でこのoverlay配下のkustomization.yamlを書き換えてprod
+# ブランチにcommit&pushする。namespace(prod)・app-env/ghcr-pull Secretは引き続き
+# CIがSSH経由で作成する(ArgoCDの管理対象外)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:fumikun/2026kosensai.git
+    targetRevision: prod
+    path: infra/k8s/overlays/prod/app-dynamic
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

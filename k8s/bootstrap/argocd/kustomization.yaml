@@ -1,0 +1,19 @@
+# ArgoCD自体のインストール。k3s/(ブートストラップ層)と同じ位置付けで、
+# k8s/overlays/shared のようにArgoCDへ委譲せずpush-CI(deploy.yml)が恒久的に
+# apply する(ArgoCDが壊れた場合にArgoCD自身では直せなくなるchicken-and-egg
+# 問題を避けるため)。バージョンは実装時のGitHub Releases最新安定版を明示的に
+# pinする(再現性のため、latestブランチ等は参照しない)。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: argocd
+
+resources:
+  - namespace.yaml
+  - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.2/manifests/install.yaml
+  - ../../base/ingress
+  - argocd-route.yaml
+
+patches:
+  - path: argocd-cm-patch.yaml
+  - path: argocd-cmd-params-cm-patch.yaml
