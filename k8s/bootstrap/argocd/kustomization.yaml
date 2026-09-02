@@ -17,3 +17,4 @@ resources:
 patches:
   - path: argocd-cm-patch.yaml
   - path: argocd-cmd-params-cm-patch.yaml
+  - path: scale-down-unused.yaml
