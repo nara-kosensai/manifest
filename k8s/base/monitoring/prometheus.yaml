@@ -77,6 +77,16 @@ data:
         relabel_configs:
           - action: labelmap
             regex: __meta_kubernetes_node_label_(.+)
+        # cAdvisorはpod以外のsystemdスライス等のcgroupも含め大量の系列を吐くため、
+        # メモリ削減のためpod/container単位の系列だけに絞り、かつ普段使わない
+        # 高カーディナリティなmetric familyをここでdropする。
+        metric_relabel_configs:
+          - source_labels: [pod, container]
+            regex: ';|;.*|.*;'
+            action: drop
+          - source_labels: [__name__]
+            regex: 'container_fs_.*|container_network_.*|container_blkio_device_usage_total|container_tasks_state|container_memory_failures_total|container_spec_.*'
+            action: drop
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
