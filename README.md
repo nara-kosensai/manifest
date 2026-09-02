@@ -90,12 +90,13 @@ config/
 | `web-static` | 過去年度アーカイブ, storybook, form-preview(singleton) | `config`リポジトリ | ArgoCD(`platform-shared` Application) |
 | `network` | cloudflared(singleton) | `config`リポジトリ | ArgoCD(`platform-shared` Application) |
 | `monitoring` | Loki, Grafana, Prometheus, node-exporter | `config`リポジトリ | ArgoCD(`platform-shared` Application) |
+| `pgadmin` | pgAdmin(prod/test DB共通の1インスタンス) | `config`リポジトリ | ArgoCD(`platform-shared` Application) |
 | `argocd` | ArgoCD本体(GitOpsコントローラ) | `config`リポジトリ(`k8s/bootstrap/argocd/`) | `config`のCI(push-CI、恒久) |
 | `kube-system` | k3s同梱Traefik(ClusterIPのみ、公開ポートなし) | `config`リポジトリ(`k3s/`) | `k3s/`ブートストラップ(push-CI、恒久) |
 
 namespace自体の作成・ArgoCDの管理対象外のSecret(app-env/ghcr-pull/grafana-secrets/
-cloudflared-credentials/cloudflare-origin-cert)の投入は、引き続き各リポジトリのCIが
-SSH経由で行う。
+pgadmin-secrets/cloudflared-credentials/cloudflare-origin-cert)の投入は、引き続き
+各リポジトリのCIが(pgadmin-secretsのみ手動で)SSH経由で行う。
 
 過去にInfisicalを`infisical` namespaceで運用していたが廃止した(秘密情報は
 下記の通り`app-env`のgitコミットとGitHub Secretsに移行した)。VPS上に
@@ -244,24 +245,33 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
      --from-literal=admin-password='<GF_SECURITY_ADMIN_PASSWORD>' \
      --from-literal=github-client-secret='<GF_AUTH_GITHUB_CLIENT_SECRET>'
    ```
-5. **GHCR pull用PAT**(`web-static` namespaceのwww-archive/storybookイメージがPrivateなため):
+5. **pgAdminの秘密情報を投入**(prod/test共通の1インスタンスに統合済み。値は旧
+   `2026kosensai`リポジトリの`prod.env`/`staging.env`にあった
+   `PGADMIN_DEFAULT_EMAIL`/`PGADMIN_DEFAULT_PASSWORD`と同じもので構わない):
+   ```
+   kubectl create namespace pgadmin
+   kubectl -n pgadmin create secret generic pgadmin-secrets \
+     --from-literal=default-email='<PGADMIN_DEFAULT_EMAIL>' \
+     --from-literal=default-password='<PGADMIN_DEFAULT_PASSWORD>'
+   ```
+6. **GHCR pull用PAT**(`web-static` namespaceのwww-archive/storybookイメージがPrivateなため):
    ```
    kubectl create namespace web-static
    kubectl -n web-static create secret docker-registry ghcr-pull \
      --docker-server=ghcr.io --docker-username=<github-username> \
      --docker-password=<read:packages スコープのPAT>
    ```
-6. **`config`リポジトリのGitHub Actions環境(`production-vps`)にSSH関連シークレットを設定**:
+7. **`config`リポジトリのGitHub Actions環境(`production-vps`)にSSH関連シークレットを設定**:
    `SSH_PRIVATE_KEY` / `SSH_USER` / `SSH_HOST` / `CLOUDFLARED_CLIENT_ID` /
    `CLOUDFLARED_CLIENT_SECRET`(値は2026kosensaiリポジトリのものと同じでよい、
    SSH管理用Cloudflare Accessトンネル経由でVPSに入るため)。**`SSH_USER`はVPS上のCI専用
    アカウント(例: `github`)を指し、対話ログインで使う`admin`アカウントとは別物**。この
    `SSH_USER`のホームディレクトリ(`/home/<SSH_USER>`)には自由に書き込めること、また
    `/var/lib/rancher/k3s/server/manifests/` へのパスワードなし`sudo`を実行できることが必要。
-7. **2026kosensaiリポジトリの`production-vps`/`test-vps` environmentに
+8. **2026kosensaiリポジトリの`production-vps`/`test-vps` environmentに
    `GHCR_PULL_TOKEN`(read:packages スコープのPAT)をGitHub Environment Secretとして
    追加**(prod/test namespace用のimagePullSecret。Infisicalは経由しない)。
-8. **ArgoCD自体をインストール**: 手順1〜7を終えた状態で`config`リポジトリの`main`への
+9. **ArgoCD自体をインストール**: 手順1〜8を終えた状態で`config`リポジトリの`main`への
    pushでCIが`k8s/bootstrap/argocd`を適用し、ArgoCD本体が立ち上がる
    (`kubectl -n argocd get pods`で確認)。
 9. **GitHubリポジトリへの読み取り用SSH Deploy Keyを発行**: `config`(`nara-kosensai/manifest`)

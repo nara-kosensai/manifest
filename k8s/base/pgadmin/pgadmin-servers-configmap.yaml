@@ -1,0 +1,30 @@
+# pgAdmin4はこのJSONを起動時に読み込み、Server一覧を事前登録する(パスワードは
+# セキュリティ上ここには書けないため、初回接続時にUIで入力してブラウザに保存する)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgadmin-servers
+data:
+  servers.json: |
+    {
+      "Servers": {
+        "1": {
+          "Name": "prod",
+          "Group": "Servers",
+          "Host": "db.prod.svc.cluster.local",
+          "Port": 5432,
+          "MaintenanceDB": "app",
+          "Username": "user",
+          "SSLMode": "disable"
+        },
+        "2": {
+          "Name": "test",
+          "Group": "Servers",
+          "Host": "db.test.svc.cluster.local",
+          "Port": 5432,
+          "MaintenanceDB": "app",
+          "Username": "user",
+          "SSLMode": "disable"
+        }
+      }
+    }
