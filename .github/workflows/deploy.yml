@@ -127,10 +127,16 @@ jobs:
 
       # ArgoCD自体のインストールはk3s/同様、ArgoCDに委譲せずこのCIが恒久的に適用する
       # (ArgoCDが壊れた場合にArgoCD自身では直せなくなるchicken-and-egg問題を避けるため)。
+      #
+      # --server-side が必須: upstream install.yamlのCRD(特にapplicationsets.argoproj.io)は
+      # 定義が非常に大きく、通常のclient-side apply(`kubectl.kubernetes.io/
+      # last-applied-configuration`アノテーションにフルマニフェストを埋め込む方式)だと
+      # そのアノテーションがKubernetesの上限(262144バイト)を超えて失敗する
+      # ("metadata.annotations: Too long"エラー)。server-side applyはこのアノテーションを
+      # 使わないため発生しない(ArgoCD公式ドキュメントでも推奨されている方式)。
       - name: Apply ArgoCD bootstrap manifests
         env:
           KUBECTL: "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl"
         run: |
-          ssh vps "$KUBECTL apply -k /home/github/k8s-shared/bootstrap/argocd"
+          ssh vps "$KUBECTL apply -k /home/github/k8s-shared/bootstrap/argocd --server-side --force-conflicts"
           ssh vps "$KUBECTL -n argocd rollout status deployment/argocd-server --timeout=180s"
-          
