@@ -133,6 +133,17 @@ spec:
       containers:
         - name: prometheus
           image: prom/prometheus:v2.51.0
+          # GOMEMLIMITはハードリミット(512Mi)より低いソフト上限をGoランタイムに
+          # 教え、cgroup OOM killで落ちる前にGCを強めに回して踏みとどまらせる
+          # (それでも収まらない場合は最終的にlimitsでOOMKillされる)。
+          env:
+            - name: GOMEMLIMIT
+              value: "440MiB"
+          resources:
+            requests:
+              memory: 256Mi
+            limits:
+              memory: 512Mi
           ports:
             - containerPort: 9090
           volumeMounts:
