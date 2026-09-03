@@ -4,15 +4,16 @@ kind: Kustomization
 # web-staticとnetworkはnamespaceが異なるため、それぞれ別のnamespaceを
 # 指定するサブディレクトリのkustomizationとしてまとめてある。
 resources:
-  - web-static
-  - network
-  - monitoring
-  - pgadmin
+- web-static
+- network
+- monitoring
+- pgadmin
 
 images:
-  - name: ghcr.io/nara-kosensai/www-archive
-    newTag: latest
-  - name: ghcr.io/fumikun/2026kosensai-storybook
-    newTag: latest
-  - name: ghcr.io/fumikun/kosensai-form-preview
-    newTag: latest
+- name: ghcr.io/fumikun/2026kosensai-storybook
+  newTag: latest
+- name: ghcr.io/fumikun/kosensai-form-preview
+  newName: ghcr.io/fumikun/kosensai-form-preview
+  newTag: 7fc5c75f1b735b588ebd493668b1c94dccf69c65
+- name: ghcr.io/nara-kosensai/www-archive
+  newTag: latest
