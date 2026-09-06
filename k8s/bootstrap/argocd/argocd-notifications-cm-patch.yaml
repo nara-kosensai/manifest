@@ -1,7 +1,7 @@
 # Teams(Power Automateフロー経由)へのデプロイ通知。webhook URLはPower Automate
 # フローの署名付きURL(sigパラメータ)を含む機微情報のためここにはコミットせず、
 # argocd-notifications-secretのteams-webhook-urlキーとして手動投入する
-# (README.md「一度きりの手動ブートストラップ手順」参照)。`$teams-webhook-url`は
+# (docs/bootstrap.md参照)。`$teams-webhook-url`は
 # そのSecretの値に置換される(公式のnotifications機能)。
 #
 # ボディはPower Automateの「Adaptive Cardを投稿」系フロー(HTTPトリガーの

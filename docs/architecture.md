@@ -294,7 +294,7 @@ ArgoCD(namespace: `argocd`、`argocd.nara-kosensai.com`でCloudflare Tunnel + Ac
 | `ingress-prod` / `ingress-test` | 同上 / `.../ingress` | IngressRoute/Middleware |
 
 各リポジトリへの読み取りアクセスはリポジトリ単位のSSH Deploy Keyで行う(`argocd`namespace内に
-`argocd.argoproj.io/secret-type: repository`ラベル付きSecretとして登録、README.md参照)。
+`argocd.argoproj.io/secret-type: repository`ラベル付きSecretとして登録、[bootstrap.md](bootstrap.md)参照)。
 CIは`git push`後のArgoCDの実際のsync/rollout成否を待たない点に注意
 (現状はArgoCD UI/通知で監視する運用、CI失敗としては検知しない)。
 
@@ -380,3 +380,22 @@ Secret類(`app-env`, `ghcr-pull`, `grafana-secrets`, `cloudflared-credentials`,
 | 管理用SSH | Cloudflare Access Tunnel(公開Web用Tunnelとは別物、outbound-only) |
 
 *(表: 設定値リファレンス)*
+
+## 付録: 旧nginx構成との対応関係
+
+VPSネイティブのnginx + 複数docker-compose(`nginx.conf` / `default.conf` / `grafana/`)から
+k3sへ全面移行した際の対応表。現行の実装は上記各節を参照。
+
+| 旧 (`default.conf`) | 新 |
+| --- | --- |
+| http-context の `add_header` (CSP等) | `k8s/base/ingress/security-headers.yaml` |
+| www→apex, `/`, `/2026`, `/2026/app` リダイレクト | `2026kosensai/infra/k8s/overlays/{prod,test}/ingress/redirects.yaml` |
+| 旧年度(2009-2016,2021)の外部リダイレクト | 同上(prodのみ) |
+| `/2026/app/` → `proxy_pass localhost:3000` | `2026kosensai`側 IngressRoute(frontend Service) |
+| `/2026/` → `alias .../website/dist/` | 同上(website Service, CIビルドのnginxイメージ) |
+| `root /var/www/html/`(過去年度アーカイブ) | `k8s/base/web-static/archive-*.yaml` |
+| `/404.html` alias | `2026kosensai`側 errors Middleware(`web-static`のwww-archiveを参照) |
+| storybookサーバブロック | `k8s/overlays/shared/web-static/storybook-route.yaml` |
+| `:8080 /metrics` (nginx stub_status) | Traefikの標準Prometheusメトリクス |
+| `grafana/docker-compose.yml`(Loki, Grafana, Prometheus, node-exporter, promtail, nginx-exporter) | `k8s/base/monitoring/*`。**promtailとnginx-exporterはnginx retireに伴い廃止**(promtailの役割はGrafana Alloyに、nginx-exporterの役割はTraefikネイティブメトリクスに統合) |
+| `infisical/docker-compose.prod.yml` | 廃止([シークレット管理](#シークレット管理)の通り、秘密情報はgitコミットとGitHub Secretsに移行) |

@@ -183,9 +183,9 @@ kubectl get pods -A -o wide   # 数十秒待って Pending が解消するか確
 ### 何が起きるか
 
 `prod` / `test` namespaceの`backend`(2026kosensaiリポジトリ管理)や、`web-static`
-namespaceの各Deployment(README.md参照)は、`ghcr-pull`という`kubernetes.io/dockerconfigjson`
+namespaceの各Deploymentは、`ghcr-pull`という`kubernetes.io/dockerconfigjson`
 Secretを使ってGHCRの非公開イメージをpullする。このSecretはCIでは投入されず、
-[README.md](../README.md)の手順に従い`read:packages`スコープのPersonal Access Token(PAT)
+[bootstrap.md](bootstrap.md)の手順に従い`read:packages`スコープのPersonal Access Token(PAT)
 で手動作成したもの(ブートストラップ時の一度きりの手動投入)。
 
 PATには有効期限を設定できるため、期限切れになるとイメージpullが
@@ -300,7 +300,7 @@ KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n argocd get secrets \
 ### 対処
 
 - **認証エラー(Deploy Key)**: GitHub側でDeploy Keyが削除/失効していないか確認し、
-  必要なら再発行して`argocd`namespaceのSecretを作り直す(README.mdの手順9参照)。
+  必要なら再発行して`argocd`namespaceのSecretを作り直す([bootstrap.md](bootstrap.md)の手順10参照)。
 - **manifest側の構文/RBACエラー**: 該当リポジトリでのローカル`kubectl kustomize <path>`
   レンダリング確認(動作確認節参照)で問題を再現・修正し、修正をpushすれば自動的に
   再sync/selfHealされる。

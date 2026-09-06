@@ -2,7 +2,7 @@
 # https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem
 # から取得したもので秘密情報ではないためgit管理する(定期的に上記URLと差分がないか
 # 確認すること。CloudflareのOrigin Authentication機能全体の説明は
-# nara-kosensai/config の README.md を参照)。
+# docs/architecture.md「TLS / mTLS」の節を参照)。
 #
 # TraefikのTLSOption(cloudflare-mtls.yaml)がこの証明書でCloudflareからの
 # クライアント証明書を検証する。websecure-mtlsエントリーポイントを使う

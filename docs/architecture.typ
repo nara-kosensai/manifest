@@ -600,7 +600,7 @@ ArgoCD(namespace: `argocd`、`argocd.nara-kosensai.com`でCloudflare Tunnel + Ac
 ) <argocd-apps-table>
 
 各リポジトリへの読み取りアクセスはリポジトリ単位のSSH Deploy Keyで行う(`argocd`namespace内に
-`argocd.argoproj.io/secret-type: repository`ラベル付きSecretとして登録、README.md参照)。
+`argocd.argoproj.io/secret-type: repository`ラベル付きSecretとして登録、bootstrap.md参照)。
 CIは`git push`後のArgoCDの実際のsync/rollout成否を待たない点に注意
 (現状はArgoCD UI/通知で監視する運用、CI失敗としては検知しない)。
 
