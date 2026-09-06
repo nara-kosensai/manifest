@@ -95,8 +95,9 @@ config/
 | `kube-system` | k3s同梱Traefik(ClusterIPのみ、公開ポートなし) | `config`リポジトリ(`k3s/`) | `k3s/`ブートストラップ(push-CI、恒久) |
 
 namespace自体の作成・ArgoCDの管理対象外のSecret(app-env/ghcr-pull/grafana-secrets/
-pgadmin-secrets/cloudflared-credentials/cloudflare-origin-cert)の投入は、引き続き
-各リポジトリのCIが(pgadmin-secretsのみ手動で)SSH経由で行う。
+pgadmin-secrets/cloudflared-credentials/cloudflare-origin-cert/
+argocd-notifications-secret)の投入は、引き続き各リポジトリのCIが
+(pgadmin-secrets/argocd-notifications-secretのみ手動で)SSH経由で行う。
 
 過去にInfisicalを`infisical` namespaceで運用していたが廃止した(秘密情報は
 下記の通り`app-env`のgitコミットとGitHub Secretsに移行した)。VPS上に
@@ -305,6 +306,15 @@ namespace)だけは、Cloudflare Tunnelを使わずCloudflareの
     追加する。ArgoCDの初期adminパスワードは`kubectl -n argocd get secret
     argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`で取得できる
     (初回ログイン後、ローテーション/削除を推奨)。
+12. **Teams通知用webhook URLを投入**(`argocd-notifications-cm-patch.yaml`が参照する
+    `$teams-webhook-url`の実体。Power Automateフローの署名付きURLで機微情報のため
+    git管理しない):
+    ```
+    kubectl -n argocd create secret generic argocd-notifications-secret \
+      --from-literal=teams-webhook-url='<Power AutomateフローのHTTPトリガーURL>'
+    ```
+    (Secretを更新した場合は`kubectl -n argocd rollout restart
+    deployment/argocd-notifications-controller`で反映する)。
 
 これ以降、共有プラットフォーム設定は `config` への push (`main`ブランチ) で、
 アプリ本体は `2026kosensai` の `prod`/`test` ブランチへのpushで、それぞれ独立に
