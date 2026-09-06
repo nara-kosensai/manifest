@@ -14,6 +14,6 @@ images:
   newTag: latest
 - name: ghcr.io/fumikun/kosensai-form-preview
   newName: ghcr.io/fumikun/kosensai-form-preview
-  newTag: 4b69f90f0d25b412a0eb1f821a57b33d946f3a94
+  newTag: 7393dcc87dcddd3a40278d1a55e5a41cc7c85cba
 - name: ghcr.io/nara-kosensai/www-archive
   newTag: latest
