@@ -72,31 +72,30 @@
    `GHCR_PULL_TOKEN`(read:packages スコープのPAT)をGitHub Environment Secretとして
    追加**(prod/test namespace用のimagePullSecret。Infisicalは経由しない)。
 9. **ArgoCD自体をインストール**: 手順1〜8を終えた状態で`manifest`リポジトリの`main`への
-   pushでCIが`k8s/bootstrap/argocd`を適用し、ArgoCD本体が立ち上がる
+   pushでCIが`argocd`を適用し、ArgoCD本体が立ち上がる
    (`kubectl -n argocd get pods`で確認)。
-10. **GitHubリポジトリへの読み取り用SSH Deploy Keyを発行**: `manifest`
-    (`nara-kosensai/manifest`)と`2026kosensai`それぞれのリポジトリ設定
-    `Settings > Deploy keys` で読み取り専用(Write access不要)のDeploy Keyを追加し、
-    対応する秘密鍵をArgoCDに登録する:
+10. **`manifest`リポジトリへの読み取り用SSH Deploy Keyを発行**: すべてのk8sマニフェスト
+    (共有プラットフォーム設定・アプリ本体・website)がこの1リポジトリに集約されたため、
+    ArgoCDが直接gitをpullする対象は`manifest`リポジトリのみでよい。`Settings > Deploy keys`
+    で読み取り専用(Write access不要)のDeploy Keyを追加し、対応する秘密鍵をArgoCDに登録する:
     ```
     kubectl -n argocd create secret generic manifest-repo \
       --from-literal=type=git \
       --from-literal=url=git@github.com:nara-kosensai/manifest.git \
       --from-file=sshPrivateKey=<manifest用秘密鍵のパス>
     kubectl -n argocd label secret manifest-repo argocd.argoproj.io/secret-type=repository
-
-    kubectl -n argocd create secret generic 2026kosensai-repo \
-      --from-literal=type=git \
-      --from-literal=url=git@github.com:fumikun/2026kosensai.git \
-      --from-file=sshPrivateKey=<2026kosensai用秘密鍵のパス>
-    kubectl -n argocd label secret 2026kosensai-repo argocd.argoproj.io/secret-type=repository
     ```
+    (`2026kosensai`リポジトリはビルド/イメージpushとタグ更新commitのみを行い、ArgoCDが
+    直接読み取ることはないため、こちらへのDeploy Keyは不要。ただし`2026kosensai`側のCIが
+    `manifest`リポジトリへコミット&プッシュできるよう、`manifest`への書き込み権限を持つ
+    別のDeploy Key/PATを`2026kosensai`側のGitHub Environment Secretとして用意すること)。
 11. **ArgoCDのApp-of-appsをブートストラップ**: `root-app.yaml`だけを一度きり手動でapplyする
     (以降はこのファイル自体もgit経由でArgoCDが管理する)。
     ```
-    kubectl apply -f k8s/argocd-apps/root-app.yaml
+    kubectl apply -f applications/root-app.yaml
     ```
-    続けて`platform-shared`をはじめ各Applicationが`argocd`namespaceに現れる
+    続けて`network`/`monitoring`/`pgadmin`/`web-static`/`app-prod`/`app-test`/
+    `website-prod`/`website-test`をはじめ各Applicationが`argocd`namespaceに現れる
     (`kubectl -n argocd get applications`)。**本番影響を避けるため、`kubectl apply`直後は
     各Applicationで`argocd app diff <name>`を実行し、gitとVPS上の実際の状態に差分がないことを
     確認してから運用を続けること**(差分がある場合、意図しないリソースの再作成/削除が
@@ -106,7 +105,7 @@
     追加する。ArgoCDの初期adminパスワードは`kubectl -n argocd get secret
     argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`で取得できる
     (初回ログイン後、ローテーション/削除を推奨)。
-13. **Teams通知用webhook URLを投入**(`k8s/bootstrap/argocd/argocd-notifications-cm-patch.yaml`
+13. **Teams通知用webhook URLを投入**(`argocd/argocd-notifications-cm-patch.yaml`
     が参照する`$teams-webhook-url`の実体。Power Automateフローの署名付きURLで機微情報のため
     git管理しない):
     ```
@@ -136,21 +135,24 @@
     5. 動作確認後、`nara-kosensai.com` / `www.nara-kosensai.com` のDNSレコードを
        Tunnel向けCNAME(`<tunnel-id>.cfargotunnel.com`)から、VPSの公開IPを指す
        A(/AAAA)レコード(Proxied継続)に切り替える。
-    6. 切り替え後、`k8s/base/network/cloudflared-configmap.yaml` の`ingress`から
+    6. 切り替え後、`network/cloudflared-configmap.yaml` の`ingress`から
        `nara-kosensai.com` / `www.nara-kosensai.com` のエントリを削除してよい
        (test/admin系は残す)。
 
-これ以降、共有プラットフォーム設定は `manifest` への push (`main`ブランチ) で、
-アプリ本体は `2026kosensai` の `prod`/`test` ブランチへのpushで、それぞれ独立に
-コードから再現・更新される。ただし実際のマニフェストapplyはArgoCDが担うため、
-CIのpush自体はgitの内容を更新するだけであり、反映確認はArgoCD UI/CLIで行う。
+これ以降、共有プラットフォーム設定・アプリ本体・websiteのマニフェストはすべて`manifest`
+への push(`main`ブランチ)でコードから再現・更新される。`2026kosensai`リポジトリの
+CIはイメージのbuild/pushと、`manifest`側マニフェストのイメージタグ更新commit&pushだけを
+行う。ただし実際のマニフェストapplyはArgoCDが担うため、CIのpush自体はgitの内容を
+更新するだけであり、反映確認はArgoCD UI/CLIで行う。
 
 ## 構築後の動作確認
 
 ```sh
-kubectl kustomize k8s/overlays/shared      # レンダリング確認
-kubectl apply --dry-run=server -k k8s/overlays/shared
-kubectl kustomize k8s/bootstrap/argocd     # ArgoCD自体のレンダリング確認
+for dir in network monitoring pgadmin web-static app-prod app-test website-prod website-test; do
+  kubectl kustomize "$dir"                       # レンダリング確認
+  kubectl apply --dry-run=server -k "$dir"
+done
+kubectl kustomize argocd     # ArgoCD自体のレンダリング確認
 ```
 
 適用後:

@@ -1,0 +1,21 @@
+# cloudflared(公開Web用Tunnel)。namespace: network。
+# cloudflared-credentials Secretは引き続きCIがSSH経由で作成する(ArgoCDの管理対象外)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: network
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:nara-kosensai/manifest.git
+    targetRevision: main
+    path: network
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

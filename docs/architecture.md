@@ -30,18 +30,25 @@ nara-kosensaiは、単一VPS上のシングルノードk3sクラスタで運用�
 (`nara-kosensai.com` / `www.nara-kosensai.com`)で、CloudflareのOrigin
 Authentication(mTLS)を使い、Tunnelを経由せず直接オリジンに到達させる。
 
-このクラスタの設定は4つのリポジトリに分散して管理する。特定サービスに紐づかない共有プラット
-フォーム設定・クラスタブートストラップは本リポジトリ(`nara-kosensai/manifest`)に、アプリ/コンテ
-ンツ固有の設定はそれぞれのサービスのリポジトリに置く方針である。
+このクラスタの**k8sマニフェストはすべて本リポジトリ(`nara-kosensai/manifest`)に集約する**
+方針である(ディレクトリ構造は[traPtitech/manifest](https://github.com/traPtitech/manifest)を
+参考にしたサービス単位のトップレベルディレクトリ構成)。アプリ/コンテンツ固有のコード
+(Dockerfile・アプリ本体のソース)だけそれぞれのサービスのリポジトリに置く。
 
 | リポジトリ | 内容 |
 | --- | --- |
-| `nara-kosensai/manifest`(本リポジトリ) | クラスタブートストラップ(`k3s/`)、特定サービスに紐づかない共有プラットフォーム設定(`k8s/`：cloudflared, Grafana/Loki/Prometheus, 過去年度アーカイブ, storybook, kosensai-form-preview のデプロイ定義)、この仕様書。CIは`main`ブランチへのpushで発火 |
-| `fumikun/2026kosensai` | 当年アプリ本体(backend/frontend/db/pgadmin/website)のDockerfile・k8sマニフェスト(`infra/k8s/base/`, `overlays/{prod,test}`)・CI/CD。`prod`/`test`ブランチへのpushでそれぞれ本番/検証環境にデプロイ |
-| `nara-kosensai/www` | 過去年度(2017--2025)アーカイブサイトの中身と、そのイメージをビルドするDockerfile・CI。デプロイ先マニフェスト(`k8s/base/web-static/archive-*.yaml`)は本リポジトリ側が保持する |
-| `fumikun/kosensai-form-preview` | 高専祭掲載情報プレビューツール本体・CI。デプロイ先マニフェストは本リポジトリ側(`k8s/base/web-static/form-preview-*.yaml`) |
+| `nara-kosensai/manifest`(本リポジトリ) | 全k8sマニフェスト(クラスタブートストラップ`k3s/`、ArgoCD本体`argocd/`、Application定義`applications/`、共有プラットフォーム設定`network/`・`monitoring/`・`pgadmin/`・`web-static/`、アプリ本体`app-{prod,test}/`、website`website-{prod,test}/`)、この仕様書。CIは`main`ブランチへのpushで発火 |
+| `fumikun/2026kosensai` | 当年アプリ本体(backend/frontend/db/website)のDockerfile・CI/CD。CIはイメージをbuild/pushした後、本リポジトリの`app-{prod,test}/`・`website-{prod,test}/`のイメージタグを更新してcommit&push |
+| `nara-kosensai/www` | 過去年度(2017--2025)アーカイブサイトの中身と、そのイメージをビルドするDockerfile・CI。デプロイ先マニフェスト(`web-static/archive-*.yaml`)は本リポジトリ側が保持する |
+| `fumikun/kosensai-form-preview` | 高専祭掲載情報プレビューツール本体・CI。デプロイ先マニフェストは本リポジトリ側(`web-static/form-preview-*.yaml`) |
 
 *(表: 設定リポジトリの役割分担)*
+
+> **2026-09時点の変更**: 以前は「共有プラットフォーム設定は`manifest`、アプリ/website固有の
+> k8sマニフェストは`2026kosensai`リポジトリの`infra/k8s/`」という分散管理方針を採っていたが、
+> 管理対象リポジトリを減らし`kubectl kustomize`によるローカル検証・ArgoCDのDeploy Key管理を
+> 単純化するため、全マニフェストを本リポジトリに集約した。あわせて自己ホストInfisicalの
+> 残骸(`infisical/docker-compose.prod.yml`、Infisicalは2026-08-29付けで廃止済み)も削除した。
 
 > **リポジトリ名について**：本リポジトリはGitHub上で`nara-kosensai/config`から`nara-kosensai/manifest`へリネーム済み(2026年)。リネーム後もGitHubは旧URL(`.../config.git`)から新URLへの参照を自動転送するため、旧URLを`origin`に設定した既存クローンはfetch/pushとも動作し続けるが、新規クローンやCIの`checkout`アクションは新URL(`nara-kosensai/manifest`)を使うのが望ましい。ドキュメント内では現在の正式名`manifest`を主に用い、旧名`config`は文脈上必要な場合のみ併記する。
 
@@ -170,8 +177,7 @@ table ip6 cloudflare_mtls6 {
 ### Ingressルーティング(旧nginxからの移植)
 
 旧構成のnginx `default.conf`のserver blockが持っていたパス単位のルーティング・リダイレクト
-ロジックは、TraefikのIngressRoute/Middlewareとして`2026kosensai`リポジトリ側に移植した
-(`infra/k8s/overlays/{prod,test}/ingress/`)。nginxのlongest-prefix-wins相当を明示的な
+ロジックは、TraefikのIngressRoute/Middlewareとして本リポジトリの`app-{prod,test}/ingress-route.yaml`に移植した。nginxのlongest-prefix-wins相当を明示的な
 `priority`(数値が大きいほど高優先)で再現している。
 
 | priority | マッチ条件(prod, Host=nara-kosensai.com) | Middleware | 転送先 |
@@ -187,14 +193,14 @@ table ip6 cloudflare_mtls6 {
 
 補足:
 
-- **`strip-2026-prefix`**：当年サイト(Astro)は`base: "/2026"`でビルドされ、生成HTML内のアセット参照は`/2026/...`前提。prodは旧nginxの`alias`相当の動作(内部的にプレフィックス除去)をwebsiteコンテナ側のビルド設定で吸収しているためMiddleware不要だが、testのwebsite Serviceは素のリバースプロキシ転送のため明示的な`StripPrefix`が必要(`infra/k8s/base/website/website-stripprefix.yaml`)。
+- **`strip-2026-prefix`**：当年サイト(Astro)は`base: "/2026"`でビルドされ、生成HTML内のアセット参照は`/2026/...`前提。prodは旧nginxの`alias`相当の動作(内部的にプレフィックス除去)をwebsiteコンテナ側のビルド設定で吸収しているためMiddleware不要だが、testのwebsite Serviceは素のリバースプロキシ転送のため明示的な`StripPrefix`が必要(`app-test/ingress-route.yaml`の`strip-2026-prefix` Middleware)。
 - **`archive-404`**：`Host + PathPrefix(/)`のcatch-allにヒットした結果を404として、`web-static` namespaceの`www-archive` Serviceが持つ`/2025/404.html`をerrors Middleware経由で返す(旧nginxの`root /var/www/html/` + `/404.html` aliasの再現)。
-- **`security-headers`** Middleware(`k8s/base/ingress/security-headers.yaml`、`2026kosensai`リポジトリにも同一内容を複製配置)は、`X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`に加え、Google Tag Manager / Google Fonts / YouTube埋め込みを許可するCSPを全ホスト共通で付与する。
+- **`security-headers`** Middleware(`ingress/security-headers.yaml`、`2026kosensai`リポジトリにも同一内容を複製配置)は、`X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`に加え、Google Tag Manager / Google Fonts / YouTube埋め込みを許可するCSPを全ホスト共通で付与する。
 - **pgAdmin**(`pgadmin.nara-kosensai.com` / `pgadmin-test.*`)は`web` entrypointのみを使い(Tunnel経由)、TraefikのMiddlewareではなくCloudflare Access(Tunnelのpublic hostnameに紐づく認証ポリシー、ダッシュボード側で一度きり設定)で保護する。
 
 #### Cloudflare Tunnel側のingress設定
 
-`web`entrypoint行きの全ホストは、`cloudflared`(namespace: `network`)のConfigMap(`k8s/base/network/cloudflared-configmap.yaml`)で一律`http://traefik.kube-system.svc.cluster.local:80`へ転送されるよう設定してあり、ホスト単位の実際の振り分けは前述の各namespaceのIngressRouteに委ねている。Tunnelのingressルールに現れるホストは`test.*`, `storybook.*`, `info-check.*`, `pgadmin.*`, `pgadmin-test.*`, `grafana.*`で、末尾は`service: http_status:404`のcatch-allで閉じる。本番ホスト(`nara-kosensai.com` / `www`)は、Origin Authentication移行が完了した時点でこのConfigMapのingressエントリから削除済み(現在Tunnel経由で到達するのは`test`/`web-static`/`monitoring`配下のホストのみ)。
+`web`entrypoint行きの全ホストは、`cloudflared`(namespace: `network`)のConfigMap(`network/cloudflared-configmap.yaml`)で一律`http://traefik.kube-system.svc.cluster.local:80`へ転送されるよう設定してあり、ホスト単位の実際の振り分けは前述の各namespaceのIngressRouteに委ねている。Tunnelのingressルールに現れるホストは`test.*`, `storybook.*`, `info-check.*`, `pgadmin.*`, `pgadmin-test.*`, `grafana.*`で、末尾は`service: http_status:404`のcatch-allで閉じる。本番ホスト(`nara-kosensai.com` / `www`)は、Origin Authentication移行が完了した時点でこのConfigMapのingressエントリから削除済み(現在Tunnel経由で到達するのは`test`/`web-static`/`monitoring`配下のホストのみ)。
 
 ## ネットワーク・セキュリティ
 
@@ -219,7 +225,7 @@ entrypointがClusterIPのみで待ち受けており、ホストには一切bind
   (`kubernetes.io/tls`)Secretとして投入する。
 - **クライアント証明書検証**：Traefikの`TLSOption`(namespace: `network`、名前
   `cloudflare-mtls`)が、Cloudflareが公開しているAuthenticated Origin Pulls用CA証明書
-  (`k8s/base/network/cloudflare-aop-ca.yaml`、公開情報のためgit管理)に対して
+  (`network/cloudflare-aop-ca.yaml`、公開情報のためgit管理)に対して
   `RequireAndVerifyClientCert`を要求する。FreeプランのためCloudflare管理のzone-level
   証明書を使用する(per-hostnameのカスタムクライアント証明書は非対応)。
 
@@ -234,12 +240,12 @@ spec:
       namespace: network
 ```
 
-*(ソースコード: prod IngressRouteのTLS設定(2026kosensai `infra/k8s/overlays/prod/ingress/ingressroute.yaml`))*
+*(ソースコード: prod IngressRouteのTLS設定(`app-prod/ingress-route.yaml`))*
 
 ### RBAC
 
 Prometheusとkube-state-metricsは、それぞれ専用のServiceAccountで動作し、read-onlyの
-`get`/`list`/`watch`のみを許可するClusterRoleを持つ(`k8s/base/monitoring/prometheus-rbac.yaml`、
+`get`/`list`/`watch`のみを許可するClusterRoleを持つ(`monitoring/prometheus-rbac.yaml`、
 `kube-state-metrics.yaml`)。既定のServiceAccountには何の権限も付与しない。
 
 kube-state-metrics用ClusterRoleは`list`/`watch`のみだが、対象リソースには`secrets`が含まれる(Secret自体の値ではなく、存在・メタデータを可視化するため標準的に必要とされる範囲)。書き込み権限は一切付与していない。Prometheus用ClusterRoleはノード・Pod・Service・Endpointsの`get`/`list`/`watch`に加え、kube-apiserver/kubelet/cAdvisorのメトリクスエンドポイントにアクセスするためServiceAccountトークンをbearer tokenとして使う(`kubernetes_sd_configs`によるin-cluster discovery、TLS検証は`kubelet`ジョブのみ`insecure_skip_verify: true`で緩めている。単一ノード・単一テナント運用のため許容)。
@@ -263,7 +269,7 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
 
 `manifest`リポジトリのCIが`prod.env` / `staging.env`をVPSの`/home/github/app-env/`に同期
 し、`2026kosensai`リポジトリのCIがそのパスを直接`--from-env-file`で参照する。このため
-`manifest`側のCIが`2026kosensai`側より先に一度動いている必要がある。同様に、`web-static` namespaceの`ghcr-pull` Secretは`manifest`側CIが適用する`k8s/overlays/shared`がDeploymentを作成する前提として存在している必要があり、これも一度きりの手動投入である。
+`manifest`側のCIが`2026kosensai`側より先に一度動いている必要がある。同様に、`web-static` namespaceの`ghcr-pull` Secretは、ArgoCDが適用する`web-static/`がDeploymentを作成する前提として存在している必要があり、これも一度きりの手動投入である。
 
 `prod`/`test` namespaceの`ghcr-pull`(2026kosensaiアプリのイメージpull用)は`2026kosensai`リポジトリのCI自身が、GitHub Environment Secret(`GHCR_PULL_TOKEN`)からデプロイの都度`kubectl create secret ... --dry-run=client -o yaml | kubectl apply -f -`で再生成する(こちらは一度きりの手動投入ではなくCI管理)。トークン期限切れ時の症状・対処は[operations.md](operations.md)の「3. GHCR pullトークンの期限切れ・権限エラー(403)」を参照。
 
@@ -276,25 +282,30 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
 
 | リポジトリ / ブランチ | 処理内容 |
 | --- | --- |
-| `manifest` → `main` | k3sブートストラップマニフェスト再配置 → Cloudflare IP allowlist再実行 → `k8s/`をVPSへrsync(ArgoCDが直接gitからpullするためapplyはしない)→ ArgoCD自体を`kubectl apply -k k8s/bootstrap/argocd` |
-| `2026kosensai` → `prod` | イメージbuild/push → `kustomize edit set image`でoverlayのタグ更新 → **そのままprodブランチにcommit&push**(`[skip ci]`)→ namespace作成・GHCR pullトークン/Origin CA証明書由来のSecret投入 |
-| `2026kosensai` → `test` | 同上(test namespace) |
+| `manifest` → `main` | k3sブートストラップマニフェスト再配置 → Cloudflare IP allowlist再実行 → app-env(`prod.env`/`staging.env`)をVPSへ同期 → 全マニフェストをVPSへrsync(ArgoCDが直接gitからpullするためapplyはしない、参考用の配置)→ ArgoCD自体を`kubectl apply -k argocd` |
+| `2026kosensai` → `main` | イメージbuild/push → `manifest`リポジトリの`app-{prod,test}/`・`website-{prod,test}/`を`kustomize edit set image`でタグ更新 → **`manifest`リポジトリにcommit&push** → namespace作成・GHCR pullトークン/Origin CA証明書由来のSecret投入(VPSへSSH) |
 
 *(表: CI/CDパイプライン一覧)*
 
 ArgoCD(namespace: `argocd`、`argocd.nara-kosensai.com`でCloudflare Tunnel + Access経由公開)は
-`manifest`リポジトリの`k8s/argocd-apps/`が定義するApplication(App-of-apps、`root-app`)を
-通じて、以下をgitから直接pullし`automated`(prune+selfHeal)でsyncする。
+`manifest`リポジトリの`applications/`が定義するApplication(App-of-apps、`root-app`)を
+通じて、すべて同一リポジトリ(`manifest`)の以下パスをgitから直接pullし`automated`
+(prune+selfHeal)でsyncする。
 
-| Application | source repo / path | 対象 |
+| Application | path | 対象 |
 | --- | --- | --- |
-| `platform-shared` | `manifest` / `k8s/overlays/shared` | monitoring/network/web-static/ingress |
-| `app-prod` / `app-test` | `2026kosensai` (`prod`/`test`ブランチ) / `infra/k8s/overlays/{prod,test}/app-dynamic` | backend/frontend/db/pgadmin |
-| `website-prod` / `website-test` | 同上 / `.../website` | website |
-| `ingress-prod` / `ingress-test` | 同上 / `.../ingress` | IngressRoute/Middleware |
+| `network` | `network/` | cloudflared |
+| `monitoring` | `monitoring/` | Grafana/Loki/Prometheus/node-exporter/kube-state-metrics |
+| `pgadmin` | `pgadmin/` | 統合pgAdminインスタンス |
+| `web-static` | `web-static/` | www-archive/storybook/form-preview |
+| `app-prod` / `app-test` | `app-prod/` / `app-test/` | backend/frontend/db、当該namespaceのIngressRoute/Middleware |
+| `website-prod` / `website-test` | `website-prod/` / `website-test/` | website |
 
-各リポジトリへの読み取りアクセスはリポジトリ単位のSSH Deploy Keyで行う(`argocd`namespace内に
-`argocd.argoproj.io/secret-type: repository`ラベル付きSecretとして登録、[bootstrap.md](bootstrap.md)参照)。
+`manifest`リポジトリのみがArgoCDの読み取り対象のため、Deploy Keyも`manifest`用の1つのみで
+よい(`argocd`namespace内に`argocd.argoproj.io/secret-type: repository`ラベル付きSecretとして
+登録、[bootstrap.md](bootstrap.md)参照)。`2026kosensai`/`www`リポジトリはArgoCDから直接
+読み取られることはなく、CIが`manifest`リポジトリへ書き込みアクセス(別のDeploy Key/PAT)で
+イメージタグ更新をpushするのみ。
 CIは`git push`後のArgoCDの実際のsync/rollout成否を待たない点に注意
 (現状はArgoCD UI/通知で監視する運用、CI失敗としては検知しない)。
 
@@ -349,7 +360,7 @@ Helmインストール)がAPIサーバーに到達できず、インストール
 `rsync`+`kubectl apply`+複数の`rollout status`待ちという長い手続きを排除し、CIの責務を
 「イメージbuild/push + マニフェストのタグ更新をgitに反映する」ことだけに縮小する。
 
-**ArgoCD自体はGitOps管理の対象外とした**(`k8s/bootstrap/argocd/`、push-CIが恒久的に適用)。
+**ArgoCD自体はGitOps管理の対象外とした**(`argocd/`、push-CIが恒久的に適用)。
 理由は、ArgoCDの管理対象にArgoCD自身を含めると、ArgoCDが何らかの理由で壊れた場合に
 ArgoCD自身を使った復旧ができなくなるため(chicken-and-egg問題)。これは既存の`k3s/`
 ブートストラップ層(k3s本体・Traefik設定など)がpush-CI管理のまま残っている設計判断と同じ理由
@@ -388,14 +399,14 @@ k3sへ全面移行した際の対応表。現行の実装は上記各節を参�
 
 | 旧 (`default.conf`) | 新 |
 | --- | --- |
-| http-context の `add_header` (CSP等) | `k8s/base/ingress/security-headers.yaml` |
-| www→apex, `/`, `/2026`, `/2026/app` リダイレクト | `2026kosensai/infra/k8s/overlays/{prod,test}/ingress/redirects.yaml` |
+| http-context の `add_header` (CSP等) | `ingress/security-headers.yaml` |
+| www→apex, `/`, `/2026`, `/2026/app` リダイレクト | `app-{prod,test}/ingress-route.yaml` |
 | 旧年度(2009-2016,2021)の外部リダイレクト | 同上(prodのみ) |
 | `/2026/app/` → `proxy_pass localhost:3000` | `2026kosensai`側 IngressRoute(frontend Service) |
 | `/2026/` → `alias .../website/dist/` | 同上(website Service, CIビルドのnginxイメージ) |
-| `root /var/www/html/`(過去年度アーカイブ) | `k8s/base/web-static/archive-*.yaml` |
+| `root /var/www/html/`(過去年度アーカイブ) | `web-static/archive-*.yaml` |
 | `/404.html` alias | `2026kosensai`側 errors Middleware(`web-static`のwww-archiveを参照) |
-| storybookサーバブロック | `k8s/overlays/shared/web-static/storybook-route.yaml` |
+| storybookサーバブロック | `web-static/storybook-route.yaml` |
 | `:8080 /metrics` (nginx stub_status) | Traefikの標準Prometheusメトリクス |
-| `grafana/docker-compose.yml`(Loki, Grafana, Prometheus, node-exporter, promtail, nginx-exporter) | `k8s/base/monitoring/*`。**promtailとnginx-exporterはnginx retireに伴い廃止**(promtailの役割はGrafana Alloyに、nginx-exporterの役割はTraefikネイティブメトリクスに統合) |
+| `grafana/docker-compose.yml`(Loki, Grafana, Prometheus, node-exporter, promtail, nginx-exporter) | `monitoring/*`。**promtailとnginx-exporterはnginx retireに伴い廃止**(promtailの役割はGrafana Alloyに、nginx-exporterの役割はTraefikネイティブメトリクスに統合) |
 | `infisical/docker-compose.prod.yml` | 廃止([シークレット管理](#シークレット管理)の通り、秘密情報はgitコミットとGitHub Secretsに移行) |

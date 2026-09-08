@@ -1,5 +1,5 @@
 # Grafana Alloy を DaemonSet として導入し、全namespaceのPodログを収集して
-# k3s上で稼働するLoki(infra/k8s/base/monitoring, monitoring namespace)へ
+# k3s上で稼働するLoki(manifestリポジトリのmonitoring/, monitoring namespace)へ
 # クラスタ内Service DNS経由で転送する。
 #
 # 旧構成では docker の `loki` logging driver を各コンテナに直接設定していたが、

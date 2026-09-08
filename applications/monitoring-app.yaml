@@ -1,0 +1,21 @@
+# Grafana/Loki/Prometheus/node-exporter/kube-state-metrics。namespace: monitoring。
+# grafana-secrets Secretは引き続きCIがSSH経由で作成する(ArgoCDの管理対象外)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:nara-kosensai/manifest.git
+    targetRevision: main
+    path: monitoring
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

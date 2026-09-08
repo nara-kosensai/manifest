@@ -182,7 +182,8 @@ kubectl get pods -A -o wide   # 数十秒待って Pending が解消するか確
 
 ### 何が起きるか
 
-`prod` / `test` namespaceの`backend`(2026kosensaiリポジトリ管理)や、`web-static`
+`prod` / `test` namespaceの`backend`(マニフェストは本リポジトリの`app-prod`/`app-test`、
+イメージは`2026kosensai`リポジトリのCIがbuild/push)や、`web-static`
 namespaceの各Deploymentは、`ghcr-pull`という`kubernetes.io/dockerconfigjson`
 Secretを使ってGHCRの非公開イメージをpullする。このSecretはCIでは投入されず、
 [bootstrap.md](bootstrap.md)の手順に従い`read:packages`スコープのPersonal Access Token(PAT)

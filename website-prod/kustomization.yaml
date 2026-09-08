@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: prod
+
+# namespace/IngressRouteはapp-prod/が保持する(同一namespace prodへの
+# デプロイのため、namespace.yamlの重複作成はArgoCDのApplication間で問題ないが、
+# IngressRouteの定義はapp-prod側にまとめてある)。
+resources:
+  - namespace.yaml
+  - website-deployment.yaml
+  - website-service.yaml
+
+images:
+  - name: ghcr.io/fumikun/2026kosensai-website
+    newTag: latest

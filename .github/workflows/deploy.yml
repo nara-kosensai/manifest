@@ -1,9 +1,13 @@
-name: Deploy shared platform config to k3s
+name: Sync manifest repo to k3s bootstrap
 
-# ここでデプロイするのは特定サービスに紐づかない共有プラットフォーム設定
-# (cloudflared, Grafana/Loki/Prometheus, 過去年度アーカイブ, storybook)。
-# アプリ本体(backend/frontend/db/pgadmin/website)は 2026kosensai リポジトリが
-# 自身のCIで独立にデプロイする。
+# 実際のマニフェストapply(共有プラットフォーム設定・アプリ本体・website)は
+# すべてArgoCDがこのリポジトリを直接git pullして行う。このワークフローが
+# 直接手を出すのは、ArgoCDに委譲できない部分だけ:
+# - k3sブートストラップ(k3s/、traefik-config等の manifests/ 再配置)
+# - Cloudflare IP allowlist(k3s/cloudflare-ip-allowlist.sh)の再適用
+# - app-env(prod.env/staging.env)のVPSへの同期
+# - ArgoCD自体のインストール(argocd/、chicken-and-egg問題を避けるためArgoCDの
+#   管理対象外としこのCIが恒久的にapplyする)
 #
 # 秘密情報(grafana-secrets, cloudflared-credentials, web-static用ghcr-pull)は
 # このワークフローでは一切扱わない。README.mdの手順で一度きり手動投入する。
@@ -116,14 +120,15 @@ jobs:
             sudo systemctl enable --now cloudflare-ip-allowlist.timer && \
             sudo /usr/local/sbin/cloudflare-ip-allowlist.sh"
 
-      # k8s/overlays/shared(monitoring/network/web-static/ingress)の実際の適用は
-      # ArgoCD(platform-shared Application, k8s/argocd-apps/)がgitのこのリポジトリを
-      # 直接pullして担う。このCIはリポジトリの中身をVPSへ同期するだけで、
-      # kubectl applyやrollout待ちは行わない(ArgoCDのUI/通知で確認する)。
-      - name: Sync shared k8s manifests to VPS
+      # 各Application(applications/配下)が指すマニフェストの実際の適用は
+      # ArgoCDがgitのこのリポジトリを直接pullして担う。このCIはargocd/(ArgoCD自体の
+      # ブートストラップ、下記参照)以外の同期・kubectl applyやrollout待ちは行わない
+      # (ArgoCDのUI/通知で確認する)。ここでは`argocd apply -k`が参照できるよう
+      # argocd/ディレクトリだけをVPSへ同期する。
+      - name: Sync ArgoCD bootstrap manifests to VPS
         run: |
           ssh vps "mkdir -p /home/github/k8s-shared"
-          rsync -az --delete --no-times --no-perms k8s/ vps:/home/github/k8s-shared/
+          rsync -az --delete --no-times --no-perms argocd/ vps:/home/github/k8s-shared/argocd/
 
       # ArgoCD自体のインストールはk3s/同様、ArgoCDに委譲せずこのCIが恒久的に適用する
       # (ArgoCDが壊れた場合にArgoCD自身では直せなくなるchicken-and-egg問題を避けるため)。
@@ -138,5 +143,5 @@ jobs:
         env:
           KUBECTL: "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl"
         run: |
-          ssh vps "$KUBECTL apply -k /home/github/k8s-shared/bootstrap/argocd --server-side --force-conflicts"
+          ssh vps "$KUBECTL apply -k /home/github/k8s-shared/argocd --server-side --force-conflicts"
           ssh vps "$KUBECTL -n argocd rollout status deployment/argocd-server --timeout=180s"

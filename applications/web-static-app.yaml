@@ -1,0 +1,21 @@
+# 過去年度アーカイブ(www-archive) + storybook + kosensai-form-preview。namespace: web-static。
+# ghcr-pull Secretは引き続きCIがSSH経由で作成する(ArgoCDの管理対象外)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web-static
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:nara-kosensai/manifest.git
+    targetRevision: main
+    path: web-static
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

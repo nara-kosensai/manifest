@@ -1,0 +1,25 @@
+# backend/frontend/db(prod)。イメージタグは2026kosensaiのCI(deploy-prod.yml)が
+# `kustomize edit set image`でapp-prod/配下のkustomization.yamlを書き換えて
+# このリポジトリ(manifest)のmainブランチにcommit&pushする。namespace(prod)・
+# app-env/ghcr-pull Secretは引き続き2026kosensai側のCIがSSH経由で作成する
+# (ArgoCDの管理対象外)。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:nara-kosensai/manifest.git
+    targetRevision: main
+    path: app-prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
