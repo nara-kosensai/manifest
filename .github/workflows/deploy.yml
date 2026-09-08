@@ -124,11 +124,13 @@ jobs:
       # ArgoCDがgitのこのリポジトリを直接pullして担う。このCIはargocd/(ArgoCD自体の
       # ブートストラップ、下記参照)以外の同期・kubectl applyやrollout待ちは行わない
       # (ArgoCDのUI/通知で確認する)。ここでは`argocd apply -k`が参照できるよう
-      # argocd/ディレクトリだけをVPSへ同期する。
+      # argocd/ディレクトリと、そのkustomization.yamlが`../ingress`として参照する
+      # ingress/ディレクトリをVPSへ同期する。
       - name: Sync ArgoCD bootstrap manifests to VPS
         run: |
           ssh vps "mkdir -p /home/github/k8s-shared"
           rsync -az --delete --no-times --no-perms argocd/ vps:/home/github/k8s-shared/argocd/
+          rsync -az --delete --no-times --no-perms ingress/ vps:/home/github/k8s-shared/ingress/
 
       # ArgoCD自体のインストールはk3s/同様、ArgoCDに委譲せずこのCIが恒久的に適用する
       # (ArgoCDが壊れた場合にArgoCD自身では直せなくなるchicken-and-egg問題を避けるため)。
