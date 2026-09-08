@@ -19,7 +19,17 @@ metadata:
   name: redirect-root
 spec:
   redirectRegex:
-    regex: "^(https://nara-kosensai\\.com(?:/2026(?:/app)?)?)$"
+    regex: "^https://nara-kosensai\\.com/?$"
+    replacement: "https://nara-kosensai.com/2026/"
+    permanent: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-2026-trailing-slash
+spec:
+  redirectRegex:
+    regex: "^(https://nara-kosensai\\.com/2026(?:/app)?)$"
     replacement: "${1}/"
     permanent: true
 ---
@@ -71,10 +81,18 @@ spec:
         - name: frontend
           port: 3000
     - kind: Rule
-      priority: 90
-      match: Host(`nara-kosensai.com`) && (Path(`/`) || Path(`/2026`) || Path(`/2026/app`))
+      priority: 91
+      match: Host(`nara-kosensai.com`) && Path(`/`)
       middlewares:
         - name: redirect-root
+      services:
+        - name: frontend
+          port: 3000
+    - kind: Rule
+      priority: 90
+      match: Host(`nara-kosensai.com`) && (Path(`/2026`) || Path(`/2026/app`))
+      middlewares:
+        - name: redirect-2026-trailing-slash
       services:
         - name: frontend
           port: 3000
