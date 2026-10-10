@@ -1,0 +1,103 @@
+# test環境用IngressRoute。app-prod/ingress-route.yamlとほぼ同構成だが、
+# entryPointはweb(Cloudflare Tunnel経由、mTLSなし)。testのwebsite Serviceは
+# 素のリバースプロキシ転送のため、明示的なStripPrefix(strip-2026-prefix)が必要
+# (docs/architecture.md参照)。
+# cloudflaredはTraefikへ平文HTTPで転送するため、Traefikが見るスキームは常に
+# httpになる(prodのwebsecure-mtlsのようにTraefik自身がTLS終端していない)。
+# regexを"^https://"決め打ちにするとtestでは一切マッチせずリダイレクトが
+# 素通りしてしまう(実際に/2026が/2026/app/2026になる不具合の原因だった)ため、
+# "^https?://"でスキームを問わずマッチさせつつ、置換後は常にhttpsを出力する。
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-root
+spec:
+  redirectRegex:
+    regex: "^https?://test\\.nara-kosensai\\.com/?$"
+    replacement: "https://test.nara-kosensai.com/2026/"
+    permanent: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-2026-trailing-slash
+spec:
+  redirectRegex:
+    regex: "^https?://(test\\.nara-kosensai\\.com/2026(?:/app)?)$"
+    replacement: "https://${1}/"
+    permanent: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-2026-prefix
+spec:
+  stripPrefix:
+    prefixes:
+      - /2026
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: archive-404
+spec:
+  errors:
+    status:
+      - "404"
+    query: /2025/404.html
+    service:
+      name: www-archive
+      namespace: web-static
+      port: 80
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: app
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      priority: 91
+      match: Host(`test.nara-kosensai.com`) && Path(`/`)
+      middlewares:
+        - name: redirect-root
+      services:
+        - name: frontend
+          port: 3000
+    - kind: Rule
+      priority: 90
+      match: Host(`test.nara-kosensai.com`) && (Path(`/2026`) || Path(`/2026/app`))
+      middlewares:
+        - name: redirect-2026-trailing-slash
+      services:
+        - name: frontend
+          port: 3000
+    - kind: Rule
+      priority: 80
+      match: Host(`test.nara-kosensai.com`) && PathPrefix(`/2026/app/`)
+      middlewares:
+        - name: security-headers
+      services:
+        - name: frontend
+          port: 3000
+    - kind: Rule
+      priority: 60
+      match: Host(`test.nara-kosensai.com`) && PathPrefix(`/2026/`)
+      middlewares:
+        - name: security-headers
+        - name: strip-2026-prefix
+      services:
+        - name: website
+          port: 80
+    - kind: Rule
+      priority: 10
+      match: Host(`test.nara-kosensai.com`) && PathPrefix(`/`)
+      middlewares:
+        - name: security-headers
+        - name: archive-404
+      services:
+        - name: www-archive
+          namespace: web-static
+          port: 80

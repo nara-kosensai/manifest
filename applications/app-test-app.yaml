@@ -1,0 +1,21 @@
+# backend/frontend/db(test)。app-prod-app.yamlと同様、対象パスのみtest。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-test
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:nara-kosensai/manifest.git
+    targetRevision: main
+    path: app-test
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: test
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

@@ -1,0 +1,33 @@
+# docker-compose.test.yml の test-backend サービスに対応。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: backend
+          image: ghcr.io/fumikun/2026kosensai-backend:latest
+          ports:
+            - containerPort: 8081
+          envFrom:
+            - secretRef:
+                name: app-env
+          readinessProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 8081
+            initialDelaySeconds: 15

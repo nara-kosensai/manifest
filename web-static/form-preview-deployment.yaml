@@ -1,0 +1,23 @@
+# 高専祭掲載情報プレビューツール。kosensai-form-preview リポジトリ自身のCIで
+# ビルド・push されるイメージを配信するだけ。singleton(prod/test共通)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: form-preview
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: form-preview
+  template:
+    metadata:
+      labels:
+        app: form-preview
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: form-preview
+          image: ghcr.io/fumikun/kosensai-form-preview:latest
+          ports:
+            - containerPort: 80

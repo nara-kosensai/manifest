@@ -1,0 +1,22 @@
+# App-of-apps: ArgoCD自身にこのディレクトリ(applications/)を管理させる。
+# これにより以降追加するApplication定義もgit経由で反映されるようになる。
+# この1ファイルだけは一度きり手動で`kubectl apply -f applications/root-app.yaml`
+# してブートストラップする(docs/bootstrap.md参照)。以後の変更はgit pushだけで反映される。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:nara-kosensai/manifest.git
+    targetRevision: main
+    path: applications
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

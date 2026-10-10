@@ -1,0 +1,62 @@
+# k3s に同梱される Traefik の設定用HelmChartConfig。
+#
+# 外部通信は原則 Cloudflare Tunnel (cloudflared) 経由のみとし、cloudflared は
+# クラスタ内部から traefik.kube-system.svc.cluster.local:80 に到達できれば
+# 十分なため、Service は ClusterIP のまま(LoadBalancer/NodePortにしない)。
+# --disable=servicelb (install.sh) と合わせて二重に防止する。
+#
+# 唯一の例外が本番アプリ(nara-kosensai.com / www.nara-kosensai.com)で、
+# CloudflareのOrigin Authentication(Authenticated Origin Pulls, mTLS)を使い
+# Tunnelを経由せず直接オリジンへ到達させる構成にしている。このためだけに
+# `websecure-mtls` エントリーポイントを追加し、コンテナの8444番ポートを
+# ノードの公開インターフェースの443番に `hostPort` で直接バインドする。
+# コンテナポートはTraefik Helmチャートのデフォルト`websecure`エントリーポイントが
+# 既に使っている8443番と衝突しないよう8444番にしている。さらに`expose.default: false`
+# にしてService(ClusterIP)には一切公開しない: hostPortはkubeletがノードの
+# インターフェースに直接bindする仕組みでService/kube-proxyを経由しないため、
+# Service側に443番ポートを追加する必要がない。むしろ追加すると`websecure`の
+# デフォルト`exposedPort: 443`と重複しHelmのインストールが失敗する
+# (実際に起きた障害: `.spec.ports: duplicate entries for key [port=443,protocol="TCP"]`)。
+# test/storybook/grafana/pgadmin等はこれまで通り`web`エントリーポイントのみを
+# 使いTunnel経由とする(このエントリーポイントにIngressRouteをbindしなければ、
+# 443番からは絶対に到達できない)。
+# 経緯は docs/architecture.md「TLS / mTLS」の節、ダッシュボード設定手順は
+# docs/bootstrap.md を参照。
+#
+# k3s はこのファイルを /var/lib/rancher/k3s/server/manifests/ に置くと
+# 自動的に適用する(HelmChartConfig CRDはTraefikコントローラのHelmリリースを
+# 上書きするための k3s 独自のカスタムリソース)。
+#
+# 適用後、必ず `kubectl get svc -n kube-system traefik` で
+# TYPE=ClusterIP になっていることを確認すること
+# (443番はService経由ではなくhostPortでのみ公開される)。
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    service:
+      type: ClusterIP
+    ports:
+      websecure-mtls:
+        port: 8444
+        hostPort: 443
+        expose:
+          default: false
+        protocol: TCP
+        tls:
+          enabled: true
+    # このクラスタは単一テナント(1人の運用者が全namespaceを管理)であり、
+    # namespace分離バイパス系の脆弱性(例: CVE-2026-71325)が意味を持つ
+    # マルチテナント環境ではないため、cross-namespaceのIngressRoute参照を許可する。
+    # ExternalName Service経由の迂回も試したが、それには別途
+    # allowExternalNameServices が必要になり複雑さが増すだけだったため、
+    # シンプルに直接のnamespace跨ぎ参照に戻した。
+    providers:
+      kubernetesCRD:
+        allowCrossNamespace: true
+    metrics:
+      prometheus:
+        enabled: true

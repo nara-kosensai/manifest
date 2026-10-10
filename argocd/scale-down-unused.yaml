@@ -1,0 +1,20 @@
+# SSO(OIDC)、ApplicationSetのいずれも使っていないため、それぞれを提供する
+# dex-server/applicationset-controllerをreplicas:0に落として常駐メモリを浮かせる
+# (削除ではなくスケールダウン: upstream install.yamlをそのまま参照しているため、
+# リソース自体を消すとinstall.yaml側の定義とkustomizeが競合する。使うようになったら
+# このファイルごと消せば復活する)。
+# notifications-controllerはTeams通知(argocd-notifications-cm-patch.yaml)で
+# 使うため対象外。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-dex-server
+spec:
+  replicas: 0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-applicationset-controller
+spec:
+  replicas: 0

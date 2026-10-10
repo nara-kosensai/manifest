@@ -1,0 +1,4 @@
+terraform.tfvars
+
+# GF_AUTH_GITHUB_CLIENT_SECRET が平文で埋め込まれているため同様にコミットしない。
+grafana/docker-compose.yml

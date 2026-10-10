@@ -1,0 +1,42 @@
+# docker-compose.prod.yml の frontend サービスに対応。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: frontend
+          image: ghcr.io/fumikun/2026kosensai-frontend:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: STAGING
+              value: "false"
+            - name: PORT
+              value: "3000"
+            - name: VITE_API_URL
+              value: http://backend:8080
+          envFrom:
+            - secretRef:
+                name: app-env
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 15

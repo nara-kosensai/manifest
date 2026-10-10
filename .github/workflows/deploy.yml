@@ -1,0 +1,149 @@
+name: Sync manifest repo to k3s bootstrap
+
+# 実際のマニフェストapply(共有プラットフォーム設定・アプリ本体・website)は
+# すべてArgoCDがこのリポジトリを直接git pullして行う。このワークフローが
+# 直接手を出すのは、ArgoCDに委譲できない部分だけ:
+# - k3sブートストラップ(k3s/、traefik-config等の manifests/ 再配置)
+# - Cloudflare IP allowlist(k3s/cloudflare-ip-allowlist.sh)の再適用
+# - app-env(prod.env/staging.env)のVPSへの同期
+# - ArgoCD自体のインストール(argocd/、chicken-and-egg問題を避けるためArgoCDの
+#   管理対象外としこのCIが恒久的にapplyする)
+#
+# 秘密情報(grafana-secrets, cloudflared-credentials, web-static用ghcr-pull)は
+# このワークフローでは一切扱わない。README.mdの手順で一度きり手動投入する。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    name: Sync k3s bootstrap + shared manifests to VPS
+    runs-on: ubuntu-latest
+    environment:
+      name: production-vps
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install cloudflared
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          latest_version=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" https://api.github.com/repos/cloudflare/cloudflared/releases/latest | jq -r '.tag_name')
+
+          if [ -z "${latest_version}" ] || [ "${latest_version}" = "null" ]; then
+            echo "::error::Could not resolve latest cloudflared release version"
+            exit 1
+          fi
+
+          mkdir -p /tmp/cloudflared
+
+          asset_id=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/cloudflare/cloudflared/releases/tags/${latest_version}" | jq -r '.assets[] | select(.name == "cloudflared-linux-amd64") | .id')
+
+          if [ -z "${asset_id}" ] || [ "${asset_id}" = "null" ]; then
+            echo "::error::Could not find cloudflared-linux-amd64 asset for ${latest_version}"
+            exit 1
+          fi
+
+          digest=$(curl -sL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/cloudflare/cloudflared/releases/assets/${asset_id}" | jq -r '.digest')
+
+          if [ -z "${digest}" ] || [ "${digest}" = "null" ]; then
+            echo "::error::GitHub API did not return a digest for asset id ${asset_id}"
+            exit 1
+          fi
+
+          curl -sL -H "Authorization: Bearer ${GH_TOKEN}" -o /tmp/cloudflared/cloudflared "https://github.com/cloudflare/cloudflared/releases/download/${latest_version}/cloudflared-linux-amd64"
+
+          expected_hash="${digest#sha256:}"
+          echo "${expected_hash}  /tmp/cloudflared/cloudflared" | sha256sum -c -
+
+          chmod +x /tmp/cloudflared/cloudflared
+          /tmp/cloudflared/cloudflared --version
+
+      - name: Set up SSH and Cloudflare Tunnel Config
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          cat <<EOF2 > ~/.ssh/config
+          Host vps
+            HostName 127.0.0.1
+            Port 22
+            User ${{ secrets.SSH_USER }}
+            IdentityFile ~/.ssh/id_rsa
+            StrictHostKeyChecking no
+            ProxyCommand /tmp/cloudflared/cloudflared access tcp --hostname ${{ secrets.SSH_HOST }} --id ${{ secrets.CLOUDFLARED_CLIENT_ID }} --secret ${{ secrets.CLOUDFLARED_CLIENT_SECRET }} --destination 127.0.0.1:22
+          EOF2
+
+      # 2026kosensaiアプリの app-env Secret(DB/pgAdmin/CORS等)の元データ。
+      # Infisicalは使わず、このリポジトリにコミットされた prod.env / staging.env を
+      # そのままVPSに同期する(2026kosensaiリポジトリのdeploy-prod.yml/deploy-test.ymlが
+      # `--from-env-file` でこのパスを直接参照する)。dev.env / backend-dev.envは
+      # ローカル開発専用でVPSには同期しない。
+      - name: Sync app-env files for 2026kosensai
+        run: |
+          ssh vps "mkdir -p /home/github/app-env"
+          scp prod.env vps:/home/github/app-env/prod.env
+          scp staging.env vps:/home/github/app-env/staging.env
+
+      # GitHub ActionsはVPSに `github` ユーザーとしてSSH接続するため、
+      # そのユーザー自身のホーム配下(/home/github)に配置する。`github`ユーザーは
+      # /var/lib/rancher/k3s/server/manifests/ への書き込みにパスワードなしsudoが必要
+      # (README.md 手順7)。kubectlは ~/.kube/config に依存せずKUBECONFIGを都度明示する。
+      - name: Sync k3s bootstrap manifests and re-apply
+        run: |
+          ssh vps "mkdir -p /home/github/k3s-bootstrap"
+          rsync -az --delete --no-times --no-perms k3s/ vps:/home/github/k3s-bootstrap/
+          # traefik-config.yaml / alloy-logging.yaml / local-path-retain-storageclass.yaml は
+          # k3sが自動適用する /var/lib/rancher/k3s/server/manifests/ に置く必要があるため sudo が要る。
+          # install.sh自体は初回インストール時のみ実行するものなのでここでは呼ばない。
+          ssh vps "sudo install -d -m 0755 /var/lib/rancher/k3s/server/manifests && \
+            sudo install -m 0644 /home/github/k3s-bootstrap/traefik-config.yaml /var/lib/rancher/k3s/server/manifests/traefik-config.yaml && \
+            sudo install -m 0644 /home/github/k3s-bootstrap/alloy-logging.yaml /var/lib/rancher/k3s/server/manifests/alloy-logging.yaml && \
+            sudo install -m 0644 /home/github/k3s-bootstrap/local-path-retain-storageclass.yaml /var/lib/rancher/k3s/server/manifests/local-path-retain-storageclass.yaml"
+
+      # Cloudflare IP allowlist(443/tcp、Origin Authentication用)のスクリプト/
+      # systemd unitはk3sの自動適用manifestsディレクトリの対象外(host netnsの
+      # nftablesを直接操作するスクリプトのため)。更新の都度、再インストールして
+      # 即座に再実行する(IPレンジ自体はsystemd timerが日次で別途更新する)。
+      - name: Sync and re-run Cloudflare IP allowlist
+        run: |
+          ssh vps "sudo install -m 0755 /home/github/k3s-bootstrap/cloudflare-ip-allowlist.sh /usr/local/sbin/cloudflare-ip-allowlist.sh && \
+            sudo install -m 0644 /home/github/k3s-bootstrap/cloudflare-ip-allowlist.service /etc/systemd/system/cloudflare-ip-allowlist.service && \
+            sudo install -m 0644 /home/github/k3s-bootstrap/cloudflare-ip-allowlist.timer /etc/systemd/system/cloudflare-ip-allowlist.timer && \
+            sudo systemctl daemon-reload && \
+            sudo systemctl enable --now cloudflare-ip-allowlist.timer && \
+            sudo /usr/local/sbin/cloudflare-ip-allowlist.sh"
+
+      # 各Application(applications/配下)が指すマニフェストの実際の適用は
+      # ArgoCDがgitのこのリポジトリを直接pullして担う。このCIはargocd/(ArgoCD自体の
+      # ブートストラップ、下記参照)以外の同期・kubectl applyやrollout待ちは行わない
+      # (ArgoCDのUI/通知で確認する)。ここでは`argocd apply -k`が参照できるよう
+      # argocd/ディレクトリと、そのkustomization.yamlが`../ingress`として参照する
+      # ingress/ディレクトリをVPSへ同期する。
+      - name: Sync ArgoCD bootstrap manifests to VPS
+        run: |
+          ssh vps "mkdir -p /home/github/k8s-shared"
+          rsync -az --delete --no-times --no-perms argocd/ vps:/home/github/k8s-shared/argocd/
+          rsync -az --delete --no-times --no-perms ingress/ vps:/home/github/k8s-shared/ingress/
+
+      # ArgoCD自体のインストールはk3s/同様、ArgoCDに委譲せずこのCIが恒久的に適用する
+      # (ArgoCDが壊れた場合にArgoCD自身では直せなくなるchicken-and-egg問題を避けるため)。
+      #
+      # --server-side が必須: upstream install.yamlのCRD(特にapplicationsets.argoproj.io)は
+      # 定義が非常に大きく、通常のclient-side apply(`kubectl.kubernetes.io/
+      # last-applied-configuration`アノテーションにフルマニフェストを埋め込む方式)だと
+      # そのアノテーションがKubernetesの上限(262144バイト)を超えて失敗する
+      # ("metadata.annotations: Too long"エラー)。server-side applyはこのアノテーションを
+      # 使わないため発生しない(ArgoCD公式ドキュメントでも推奨されている方式)。
+      - name: Apply ArgoCD bootstrap manifests
+        env:
+          KUBECTL: "KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl"
+        run: |
+          ssh vps "$KUBECTL apply -k /home/github/k8s-shared/argocd --server-side --force-conflicts"
+          ssh vps "$KUBECTL -n argocd rollout status deployment/argocd-server --timeout=180s"

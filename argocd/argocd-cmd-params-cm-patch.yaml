@@ -1,0 +1,8 @@
+# TLSはTraefik/Cloudflare側で終端するため、argocd-serverはinsecure(平文HTTP)で
+# 待ち受ける(grafana等と同じ構成)。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+data:
+  server.insecure: "true"

@@ -1,0 +1,33 @@
+# 旧nginx設定はhttp-context直下でadd_headerを宣言していたが、
+# testおよびstorybookの各server{}ブロックで独自にadd_header
+# Strict-Transport-Securityを再宣言していたため、nginxのadd_header継承ルール
+# (同ブロックで一つでもadd_headerを宣言すると親の分は全て無効になる)により、
+# test/storybookではCSP等が一切適用されていなかった(既知バグ)。
+# ここでは全namespace(prod/test/web-static)で同一のMiddlewareを使うことで、
+# 全ホストに一貫してセキュリティヘッダーを適用しバグを解消する。
+#
+# namespaceはoverlay側のkustomization.yamlの `namespace:` フィールドで
+# 自動的にスタンプされるため、ここでは指定しない。
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: security-headers
+spec:
+  headers:
+    customResponseHeaders:
+      X-Frame-Options: SAMEORIGIN
+      X-XSS-Protection: "1; mode=block"
+      X-Content-Type-Options: nosniff
+      # Google Tag Manager(gtag.js)とGoogle Fontsを許可(script-src/style-src/
+      # font-src/connect-src)。Google Mapsの埋め込み(iframe)用にframe-srcへ
+      # https://www.google.comも許可。それ以外は旧nginx設定のCSPを踏襲。
+      Content-Security-Policy: >-
+        default-src 'self'; style-src 'self' 'unsafe-inline'
+        https://fonts.googleapis.com; font-src 'self'
+        https://fonts.gstatic.com; frame-src 'self'
+        https://www.youtube.com https://www.google.com; img-src 'self' data:; script-src 'self'
+        'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com
+        https://www.googletagmanager.com; connect-src 'self'
+        https://nara-kosensai.com https://www.google-analytics.com
+        https://analytics.google.com;
+      Strict-Transport-Security: "max-age=63072000"

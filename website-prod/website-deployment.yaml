@@ -1,0 +1,33 @@
+# Astro(website/)のビルド成果物(dist/)をnginxで配信するコンテナ。
+# TODO: 2026kosensaiリポジトリに website/Dockerfile(nginx:alpineベース、
+# `pnpm --filter website build`の成果物distをCOPYするだけ)が未作成。
+# CIをdocker-compose/rsyncからイメージbuild&push方式に切り替える際に追加すること。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: website
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: website
+  template:
+    metadata:
+      labels:
+        app: website
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: website
+          image: ghcr.io/fumikun/2026kosensai-website:latest
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 15

@@ -1,0 +1,7 @@
+# CLIログイン時のリダイレクト先や通知リンクに使われる公開URL。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+data:
+  url: https://argocd.nara-kosensai.com

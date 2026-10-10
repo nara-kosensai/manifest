@@ -1,0 +1,22 @@
+# website(prod)。イメージタグは2026kosensaiのCI(deploy-prod.yml)がwebsite-prod/配下の
+# kustomization.yamlを書き換えてこのリポジトリ(manifest)のmainブランチにcommit&pushする。
+#
+# 自動デプロイは解除済み(`syncPolicy.automated`なし=手動sync)。gitのタグが更新されても
+# OutOfSyncと表示されるだけで本番には反映されない。反映するにはArgoCD UIで手動Syncする。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: website-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:nara-kosensai/manifest.git
+    targetRevision: main
+    path: website-prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false

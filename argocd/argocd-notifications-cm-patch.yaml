@@ -1,0 +1,183 @@
+# Teams(Power Automateフロー経由)へのデプロイ通知。webhook URLはPower Automate
+# フローの署名付きURL(sigパラメータ)を含む機微情報のためここにはコミットせず、
+# argocd-notifications-secretのteams-webhook-urlキーとして手動投入する
+# (docs/bootstrap.md参照)。`$teams-webhook-url`は
+# そのSecretの値に置換される(公式のnotifications機能)。
+#
+# ボディはPower Automateの「Adaptive Cardを投稿」系フロー(HTTPトリガーの
+# リクエストボディ自体がAdaptive Card JSON)向け。Teams純正の受信Webhook
+# (MessageCard/attachments形式)ではないため、フロー側のトリガースキーマと
+# 合わない場合はここのbodyを調整すること。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+data:
+  context: |
+    argocdUrl: https://argocd.nara-kosensai.com
+
+  service.webhook.teams: |
+    url: $teams-webhook-url
+    headers:
+    - name: Content-Type
+      value: application/json
+
+  trigger.on-deployed: |
+    - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+      send: [app-deployed]
+  trigger.on-health-degraded: |
+    - when: app.status.health.status == 'Degraded'
+      send: [app-health-degraded]
+  trigger.on-sync-failed: |
+    - when: app.status.operationState.phase in ['Error', 'Failed']
+      send: [app-sync-failed]
+  trigger.on-sync-succeeded: |
+    - when: app.status.operationState.phase in ['Succeeded']
+      send: [app-sync-succeeded]
+
+  template.app-deployed: |
+    webhook:
+      teams:
+        method: POST
+        body: |
+          {
+            "type": "AdaptiveCard",
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "version": "1.4",
+            "body": [
+              {
+                "type": "TextBlock",
+                "size": "Medium",
+                "weight": "Bolder",
+                "text": "✅ {{.app.metadata.name}} deployed"
+              },
+              {
+                "type": "FactSet",
+                "facts": [
+                  { "title": "Namespace", "value": "{{.app.spec.destination.namespace}}" },
+                  { "title": "Revision", "value": "{{.app.status.sync.revision}}" },
+                  { "title": "Health", "value": "{{.app.status.health.status}}" }
+                ]
+              }
+            ],
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "View in ArgoCD",
+                "url": "{{.context.argocdUrl}}/applications/{{.app.metadata.name}}"
+              }
+            ]
+          }
+
+  template.app-health-degraded: |
+    webhook:
+      teams:
+        method: POST
+        body: |
+          {
+            "type": "AdaptiveCard",
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "version": "1.4",
+            "body": [
+              {
+                "type": "TextBlock",
+                "size": "Medium",
+                "weight": "Bolder",
+                "color": "Attention",
+                "text": "⚠️ {{.app.metadata.name}} is degraded"
+              },
+              {
+                "type": "FactSet",
+                "facts": [
+                  { "title": "Namespace", "value": "{{.app.spec.destination.namespace}}" },
+                  { "title": "Health", "value": "{{.app.status.health.status}}" },
+                  { "title": "Sync status", "value": "{{.app.status.sync.status}}" }
+                ]
+              }
+            ],
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "View in ArgoCD",
+                "url": "{{.context.argocdUrl}}/applications/{{.app.metadata.name}}"
+              }
+            ]
+          }
+
+  template.app-sync-failed: |
+    webhook:
+      teams:
+        method: POST
+        body: |
+          {
+            "type": "AdaptiveCard",
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "version": "1.4",
+            "body": [
+              {
+                "type": "TextBlock",
+                "size": "Medium",
+                "weight": "Bolder",
+                "color": "Attention",
+                "text": "❌ {{.app.metadata.name}} sync failed"
+              },
+              {
+                "type": "FactSet",
+                "facts": [
+                  { "title": "Namespace", "value": "{{.app.spec.destination.namespace}}" },
+                  { "title": "Revision", "value": "{{.app.status.sync.revision}}" },
+                  { "title": "Message", "value": "{{.app.status.operationState.message}}" }
+                ]
+              }
+            ],
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "View in ArgoCD",
+                "url": "{{.context.argocdUrl}}/applications/{{.app.metadata.name}}"
+              }
+            ]
+          }
+
+  template.app-sync-succeeded: |
+    webhook:
+      teams:
+        method: POST
+        body: |
+          {
+            "type": "AdaptiveCard",
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "version": "1.4",
+            "body": [
+              {
+                "type": "TextBlock",
+                "size": "Medium",
+                "weight": "Bolder",
+                "text": "🔄 {{.app.metadata.name}} synced"
+              },
+              {
+                "type": "FactSet",
+                "facts": [
+                  { "title": "Namespace", "value": "{{.app.spec.destination.namespace}}" },
+                  { "title": "Revision", "value": "{{.app.status.sync.revision}}" },
+                  { "title": "Health", "value": "{{.app.status.health.status}}" }
+                ]
+              }
+            ],
+            "actions": [
+              {
+                "type": "Action.OpenUrl",
+                "title": "View in ArgoCD",
+                "url": "{{.context.argocdUrl}}/applications/{{.app.metadata.name}}"
+              }
+            ]
+          }
+
+  subscriptions: |
+    - recipients:
+      - teams
+      triggers:
+      - on-deployed
+      - on-health-degraded
+      - on-sync-failed
+      - on-sync-succeeded

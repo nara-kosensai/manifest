@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: web-static
+
+resources:
+- namespace.yaml
+- ../ingress
+- archive-deployment.yaml
+- archive-service.yaml
+- storybook-deployment.yaml
+- storybook-service.yaml
+- storybook-route.yaml
+- form-preview-deployment.yaml
+- form-preview-service.yaml
+- form-preview-route.yaml
+
+images:
+- name: ghcr.io/fumikun/2026kosensai-storybook
+  newTag: latest
+- name: ghcr.io/fumikun/kosensai-form-preview
+  newName: ghcr.io/fumikun/kosensai-form-preview
+  newTag: 8080604f497a88d7254d54f4ecfda2a6a37a4b1d
+- name: ghcr.io/nara-kosensai/www-archive
+  newTag: latest
