@@ -1,0 +1,17 @@
+# hr.nara-kosensai.com。pgadmin等と同じくCloudflare Tunnel経由(webエントリポイント)。
+# アプリ自身がAuth.js(Microsoft Entra ID等)で認証するためTraefik側の認証は不要。
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: hr
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`hr.nara-kosensai.com`)
+      middlewares:
+        - name: security-headers
+      services:
+        - name: hr
+          port: 80

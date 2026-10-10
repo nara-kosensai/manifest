@@ -1,0 +1,22 @@
+# fumikun/hr(シフト調整システム)。namespace: hr。
+# hr-env / ghcr-pull Secretは一度きり手動で投入する(ArgoCDの管理対象外)。
+# 新規namespaceで既存リソースとの差分がないため、最初からautomatedにしている。
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hr
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:nara-kosensai/manifest.git
+    targetRevision: main
+    path: hr
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

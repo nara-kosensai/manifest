@@ -1,0 +1,45 @@
+# fumikun/hr(高専祭シフト調整システム)。Hono(API + ビルド済みSPAの静的配信)の1コンテナ構成。
+# DBマイグレーション(drizzle)はinitContainerで毎回実行する(適用済みのものはスキップされる)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hr
+spec:
+  replicas: 1
+  # 割り当てワーカーなどインメモリ状態を持つため、旧Podを止めてから新Podを起動する。
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: hr
+  template:
+    metadata:
+      labels:
+        app: hr
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      initContainers:
+        - name: migrate
+          image: ghcr.io/fumikun/hr:latest
+          workingDir: /app/server
+          command: ["node", "dist/db/migrate.js"]
+          envFrom:
+            - secretRef:
+                name: hr-env
+      containers:
+        - name: hr
+          image: ghcr.io/fumikun/hr:latest
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - secretRef:
+                name: hr-env
+          readinessProbe:
+            tcpSocket:
+              port: 3001
+            initialDelaySeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 3001
+            initialDelaySeconds: 15

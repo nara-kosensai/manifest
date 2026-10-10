@@ -23,6 +23,7 @@ commit&pushだけを行う。
 | --- | --- |
 | `manifest`(このリポジトリ) | 全k8sマニフェスト(クラスタブートストラップ`k3s/`、ArgoCD本体`argocd/`、Application定義`applications/`、共有プラットフォーム設定、アプリ本体、website)、ドキュメント |
 | `2026kosensai` | アプリ本体(backend/frontend/db/website)のDockerfile・CI。CIはイメージをbuild/pushした後、本リポジトリの`app-{prod,test}/`・`website-{prod,test}/`配下の`kustomization.yaml`を`kustomize edit set image`で書き換えてcommit&pushする |
+| `fumikun/hr` | シフト調整システムのDockerfile・CI。CIはイメージをbuild/pushした後、本リポジトリの`hr/kustomization.yaml`を`kustomize edit set image`で書き換えてcommit&pushする(ArgoCD Application `hr`が自動sync) |
 | `www` | 過去年度アーカイブの中身と、そのイメージをビルドするDockerfile/CI(デプロイ先マニフェストは本リポジトリの`web-static/`) |
 
 新しく何かを追加するとき: そのアプリ/サービス固有のコード(Dockerfile、アプリの
@@ -39,6 +40,7 @@ manifest/
   network/        # cloudflared(公開Web用Tunnel)
   monitoring/     # Grafana, Loki, Prometheus, node-exporter, kube-state-metrics
   pgadmin/        # prod/test共通の統合pgAdminインスタンス
+  hr/             # fumikun/hr(シフト調整システム。app + PostgreSQL)
   web-static/     # 過去年度アーカイブ(www-archive) + storybook + kosensai-form-preview
   app-prod/       # アプリ本体(backend/frontend/db)prod環境
   app-test/       # アプリ本体(backend/frontend/db)test環境
@@ -119,7 +121,7 @@ Infisical(自己ホスト)は完全に廃止済み。シークレット管理の
 ## ローカルでの動作確認
 
 ```sh
-for dir in network monitoring pgadmin web-static app-prod app-test website-prod website-test; do
+for dir in network monitoring pgadmin hr web-static app-prod app-test website-prod website-test; do
   kubectl kustomize "$dir"                       # レンダリング確認
   kubectl apply --dry-run=server -k "$dir"
 done

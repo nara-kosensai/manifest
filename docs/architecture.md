@@ -39,6 +39,7 @@ Authentication(mTLS)を使い、Tunnelを経由せず直接オリジンに到達
 | --- | --- |
 | `nara-kosensai/manifest`(本リポジトリ) | 全k8sマニフェスト(クラスタブートストラップ`k3s/`、ArgoCD本体`argocd/`、Application定義`applications/`、共有プラットフォーム設定`network/`・`monitoring/`・`pgadmin/`・`web-static/`、アプリ本体`app-{prod,test}/`、website`website-{prod,test}/`)、この仕様書。CIは`main`ブランチへのpushで発火 |
 | `fumikun/2026kosensai` | 当年アプリ本体(backend/frontend/db/website)のDockerfile・CI/CD。CIはイメージをbuild/pushした後、本リポジトリの`app-{prod,test}/`・`website-{prod,test}/`のイメージタグを更新してcommit&push |
+| `fumikun/hr` | シフト調整システム本体のDockerfile・CI。CIはイメージをbuild/pushした後、本リポジトリの`hr/kustomization.yaml`のイメージタグを更新してcommit&push |
 | `nara-kosensai/www` | 過去年度(2009-2016, 2017-2025, 2021)アーカイブサイトの中身と、そのイメージをビルドするDockerfile・CI。旧年度(2009-2016, 2021)は`scripts/download-old-years.sh`で学校公式サイトから取得・UTF-8変換したもの。デプロイ先マニフェスト(`web-static/archive-*.yaml`)は本リポジトリ側が保持する |
 | `fumikun/kosensai-form-preview` | 高専祭掲載情報プレビューツール本体・CI。デプロイ先マニフェストは本リポジトリ側(`web-static/form-preview-*.yaml`) |
 
@@ -299,6 +300,7 @@ ArgoCD(namespace: `argocd`、`argocd.nara-kosensai.com`でCloudflare Tunnel + Ac
 | `network` | `network/` | cloudflared |
 | `monitoring` | `monitoring/` | Grafana/Loki/Prometheus/node-exporter/kube-state-metrics |
 | `pgadmin` | `pgadmin/` | 統合pgAdminインスタンス |
+| `hr` | `hr/` | シフト調整システム(`fumikun/hr`)のapp + PostgreSQL。`hr.nara-kosensai.com`(Tunnel経由) |
 | `web-static` | `web-static/` | www-archive/storybook/form-preview |
 | `app-prod` / `app-test` | `app-prod/` / `app-test/` | backend/frontend/db、当該namespaceのIngressRoute/Middleware |
 | `website-prod` / `website-test` | `website-prod/` / `website-test/` | website |

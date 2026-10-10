@@ -169,3 +169,32 @@ kubectl kustomize argocd     # ArgoCD自体のレンダリング確認
   でCloudflareのIPレンジが入ったsetが存在すること。VPS外の任意のIPから
   `curl -v https://<VPSの公開IP>:443 -H "Host: nara-kosensai.com"` を実行し、
   TCP接続自体がタイムアウトする(応答が一切返らない)ことを確認する。
+
+## hr(シフト調整システム)の初回Secret投入
+
+`hr/`のマニフェストはArgoCD Application `hr`が自動syncするが、以下はgit管理外のため
+一度きり手動で投入する(`hr` namespaceはArgoCDが作成するので、先に一度syncさせるか
+`kubectl create namespace hr`しておく)。
+
+```bash
+# アプリ+DB共通の環境変数。DATABASE_URLとPOSTGRES_*は値を揃えること
+kubectl -n hr create secret generic hr-env \
+  --from-literal=POSTGRES_USER=hr \
+  --from-literal=POSTGRES_PASSWORD='<強いパスワード>' \
+  --from-literal=POSTGRES_DB=hr \
+  --from-literal=DATABASE_URL='postgres://hr:<同じパスワード>@db:5432/hr' \
+  --from-literal=AUTH_SECRET="$(openssl rand -base64 32)" \
+  --from-literal=AUTH_URL=https://hr.nara-kosensai.com \
+  --from-literal=AUTH_MICROSOFT_ENTRA_ID_ID=... \
+  --from-literal=AUTH_MICROSOFT_ENTRA_ID_SECRET=... \
+  --from-literal=ALLOWED_TENANT_IDS=... \
+  --from-literal=SMTP_URL=smtp://...
+# NODE_ENV=production のままにし、AUTH_DEV_LOGIN は絶対に設定しない
+
+# GHCR pull(イメージがprivateの場合。web-staticと同じ手順/トークンで可)
+kubectl -n hr create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io --docker-username=<user> --docker-password=<PAT(read:packages)>
+```
+
+あわせてCloudflare側で`hr.nara-kosensai.com`のTunnel public hostname(DNS route)を追加する
+(`network/cloudflared-configmap.yaml`にはingressエントリ追加済み)。

@@ -34,4 +34,6 @@ data:
         service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: argocd.nara-kosensai.com
         service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: hr.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
       - service: http_status:404

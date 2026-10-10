@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: hr
+
+resources:
+- namespace.yaml
+- ../ingress
+- app-deployment.yaml
+- app-service.yaml
+- db-statefulset.yaml
+- db-service.yaml
+- ingress-route.yaml
+
+# hr-env(DATABASE_URL/AUTH_*/POSTGRES_*等)・ghcr-pull の各Secretはgit管理せず、
+# 一度きり手動で投入する(ArgoCDの管理対象外、docs/bootstrap.md参照)。
+# imagesのnewTagはfumikun/hrリポジトリのCIが`kustomize edit set image`で書き換える。
+images:
+- name: ghcr.io/fumikun/hr
+  newName: ghcr.io/fumikun/hr
+  newTag: latest
