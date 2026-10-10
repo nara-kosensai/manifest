@@ -51,6 +51,19 @@ spec:
       port: 80
 ---
 apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: archive-html-extension
+spec:
+  # アーカイブ(www-archive)のnginxは拡張子なしURLを.htmlに解決しないため、
+  # /2024/info/access のような直打ちが404になる。/2024/配下で2階層以上(他年度はディレクトリ形式で解決できるため対象外)かつ
+  # 拡張子なしのパスのみ .html に書き換える(/2024/info/ 等のディレクトリや
+  # アセットには影響しない)。
+  replacePathRegex:
+    regex: "^(/2024/[^/.]+(?:/[^/.]+)+?)/?$"
+    replacement: "${1}.html"
+---
+apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
   name: app
@@ -95,6 +108,7 @@ spec:
       priority: 10
       match: Host(`test.nara-kosensai.com`) && PathPrefix(`/`)
       middlewares:
+        - name: archive-html-extension
         - name: security-headers
         - name: archive-404
       services:
