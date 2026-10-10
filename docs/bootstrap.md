@@ -180,14 +180,14 @@ kubectl kustomize argocd     # ArgoCD自体のレンダリング確認
 # アプリ+DB共通の環境変数。DATABASE_URLとPOSTGRES_*は値を揃えること
 kubectl -n hr create secret generic hr-env \
   --from-literal=POSTGRES_USER=hr \
-  --from-literal=POSTGRES_PASSWORD='<強いパスワード>' \
+  --from-literal=POSTGRES_PASSWORD='kosensai' \
   --from-literal=POSTGRES_DB=hr \
-  --from-literal=DATABASE_URL='postgres://hr:<同じパスワード>@db:5432/hr' \
+  --from-literal=DATABASE_URL='postgres://hr:kosensai@db:5432/hr' \
   --from-literal=AUTH_SECRET="$(openssl rand -base64 32)" \
   --from-literal=AUTH_URL=https://hr.nara-kosensai.com \
-  --from-literal=AUTH_MICROSOFT_ENTRA_ID_ID=... \
-  --from-literal=AUTH_MICROSOFT_ENTRA_ID_SECRET=... \
-  --from-literal=ALLOWED_TENANT_IDS=... \
+  --from-literal=AUTH_MICROSOFT_ENTRA_ID_ID=YoJ8Q~Q6DtWzXsy8t1mW~IATF6.lxiIZ-0Of7dxb \
+  --from-literal=AUTH_MICROSOFT_ENTRA_ID_SECRET=72fe835d-5e95-4512-8ae0-a7b38af25fc8 \
+  --from-literal=ALLOWED_TENANT_IDS=72fe835d-5e95-4512-8ae0-a7b38af25fc8 \
   --from-literal=SMTP_URL=smtp://...
 # NODE_ENV=production のままにし、AUTH_DEV_LOGIN は絶対に設定しない
 
