@@ -6,9 +6,14 @@ metadata:
   name: hr
 spec:
   replicas: 1
-  # 割り当てワーカーなどインメモリ状態を持つため、旧Podを止めてから新Podを起動する。
+  # 新Podがreadyになってから旧Podを止める(ダウンタイムなしのローリング更新)。
+  # 更新中は旧新2つのPodが同じDBを使うため、マイグレーションは旧バージョンのコードでも
+  # 動く後方互換な変更(カラム追加など)にすること。
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: hr
@@ -17,6 +22,9 @@ spec:
       labels:
         app: hr
     spec:
+      # preStop(10秒)でTraefikのエンドポイントから外れるのを待ち、その後SIGTERMで
+      # アプリが処理中リクエストを完了して終了する分の余裕を含めた猶予時間。
+      terminationGracePeriodSeconds: 40
       imagePullSecrets:
         - name: ghcr-pull
       initContainers:
@@ -35,11 +43,26 @@ spec:
           envFrom:
             - secretRef:
                 name: hr-env
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "10"]
+          # /api/health が返るまでトラフィックを流さない
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /api/health
               port: 3001
-            initialDelaySeconds: 5
+            periodSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+            periodSeconds: 2
+            failureThreshold: 30
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /api/health
               port: 3001
-            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
