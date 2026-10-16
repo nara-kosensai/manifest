@@ -10,6 +10,7 @@ resources:
 - app-service.yaml
 - db-statefulset.yaml
 - db-service.yaml
+- rate-limit.yaml
 - ingress-route.yaml
 
 # hr-env(DATABASE_URL/AUTH_*/POSTGRES_*等)・ghcr-pull の各Secretはgit管理せず、

@@ -8,10 +8,37 @@ spec:
   entryPoints:
     - web
   routes:
+    # ログイン系は厳しめのレート制限（長い一致が優先されるが、priority でも明示する）
     - kind: Rule
-      match: Host(`hr.nara-kosensai.com`)
+      match: Host(`hr.nara-kosensai.com`) && PathPrefix(`/api/auth`)
+      priority: 20
       middlewares:
         - name: security-headers
+        - name: hr-auth-rate-limit
+        - name: hr-inflight
+      services:
+        - name: hr
+          port: 80
+    # 奈良高専（202.24.240.0/21 = 202.24.240.0〜202.24.247.255）からは緩める。
+    # Tunnel 経由で Traefik から見える接続元は cloudflared のため、Cloudflare が付ける
+    # CF-Connecting-IP で判定する（Cloudflare が上書きし、オリジンは Cloudflare からしか届かない）
+    - kind: Rule
+      match: Host(`hr.nara-kosensai.com`) && HeaderRegexp(`CF-Connecting-IP`, `^202\.24\.24[0-7]\.[0-9]{1,3}$`)
+      priority: 15
+      middlewares:
+        - name: security-headers
+        - name: hr-rate-limit-campus
+        - name: hr-inflight-campus
+      services:
+        - name: hr
+          port: 80
+    - kind: Rule
+      match: Host(`hr.nara-kosensai.com`)
+      priority: 10
+      middlewares:
+        - name: security-headers
+        - name: hr-rate-limit
+        - name: hr-inflight
       services:
         - name: hr
           port: 80

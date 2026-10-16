@@ -1,0 +1,62 @@
+# hr のレート制限と同時接続の上限（SECURITY_PLAN M3）。
+# Cloudflare Tunnel 経由のため、接続元のIPは Traefik から見るとトンネルのものになる。
+# 利用者ごとに数えるよう、Cloudflare が付ける CF-Connecting-IP で区別する。
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: hr-rate-limit
+spec:
+  rateLimit:
+    # SPAの初回表示は静的ファイルを十数個取るので、バーストは広めに取る
+    average: 30
+    burst: 100
+    sourceCriterion:
+      requestHeaderName: CF-Connecting-IP
+---
+# /api/auth/*（ログイン・コールバック・サインアウト）は厳しめ。1分あたり
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: hr-auth-rate-limit
+spec:
+  rateLimit:
+    period: 1m
+    average: 20
+    burst: 10
+    sourceCriterion:
+      requestHeaderName: CF-Connecting-IP
+---
+# 1つの接続元から同時に開ける接続数。変更通知(SSE)は1人3本まで（アプリ側でも制限）なので、
+# 同じ回線を使う複数人（校内のWi-Fiなど）を考えて余裕を持たせる
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: hr-inflight
+spec:
+  inFlightReq:
+    amount: 60
+    sourceCriterion:
+      requestHeaderName: CF-Connecting-IP
+---
+# 奈良高専（国立高等専門学校機構 202.24.240.0/21、SINET 経由）からの接続用。校内Wi-Fiは同じ出口IPに
+# 多数の人が相乗りするため、同時接続とレートを緩める。/api/auth/* は対象外（hr-auth-rate-limit のまま）。
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: hr-rate-limit-campus
+spec:
+  rateLimit:
+    average: 300
+    burst: 600
+    sourceCriterion:
+      requestHeaderName: CF-Connecting-IP
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: hr-inflight-campus
+spec:
+  inFlightReq:
+    amount: 600
+    sourceCriterion:
+      requestHeaderName: CF-Connecting-IP
