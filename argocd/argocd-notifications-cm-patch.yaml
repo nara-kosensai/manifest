@@ -31,9 +31,6 @@ data:
   trigger.on-sync-failed: |
     - when: app.status.operationState.phase in ['Error', 'Failed']
       send: [app-sync-failed]
-  trigger.on-sync-succeeded: |
-    - when: app.status.operationState.phase in ['Succeeded']
-      send: [app-sync-succeeded]
 
   template.app-deployed: |
     webhook:
@@ -139,40 +136,6 @@ data:
             ]
           }
 
-  template.app-sync-succeeded: |
-    webhook:
-      teams:
-        method: POST
-        body: |
-          {
-            "type": "AdaptiveCard",
-            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-            "version": "1.4",
-            "body": [
-              {
-                "type": "TextBlock",
-                "size": "Medium",
-                "weight": "Bolder",
-                "text": "🔄 {{.app.metadata.name}} synced"
-              },
-              {
-                "type": "FactSet",
-                "facts": [
-                  { "title": "Namespace", "value": "{{.app.spec.destination.namespace}}" },
-                  { "title": "Revision", "value": "{{.app.status.sync.revision}}" },
-                  { "title": "Health", "value": "{{.app.status.health.status}}" }
-                ]
-              }
-            ],
-            "actions": [
-              {
-                "type": "Action.OpenUrl",
-                "title": "View in ArgoCD",
-                "url": "{{.context.argocdUrl}}/applications/{{.app.metadata.name}}"
-              }
-            ]
-          }
-
   subscriptions: |
     - recipients:
       - teams
@@ -180,4 +143,3 @@ data:
       - on-deployed
       - on-health-degraded
       - on-sync-failed
-      - on-sync-succeeded
