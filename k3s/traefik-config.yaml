@@ -60,3 +60,14 @@ spec:
     metrics:
       prometheus:
         enabled: true
+    # アクセスログを標準出力にJSONで出し、Alloy経由でLokiに保存する。
+    # 通信はすべてCloudflare経由のため送信元IPはCloudflareのものになる。
+    # 実際の訪問者IPはCF-Connecting-IPヘッダーに入るので、これだけ残す。
+    logs:
+      access:
+        enabled: true
+        format: json
+        fields:
+          headers:
+            names:
+              CF-Connecting-IP: keep
