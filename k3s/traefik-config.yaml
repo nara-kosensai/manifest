@@ -54,6 +54,14 @@ spec:
     # ExternalName Service経由の迂回も試したが、それには別途
     # allowExternalNameServices が必要になり複雑さが増すだけだったため、
     # シンプルに直接のnamespace跨ぎ参照に戻した。
+    # hostPort 443は単一ノード上で1Podしか使えないため、デフォルトの
+    # maxSurge: 1(新Pod起動→旧Pod停止)だと新PodがPendingのまま止まる。
+    # 旧Podを先に止めてから新Podを起動する(数秒の瞬断は許容)。
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 1
+        maxSurge: 0
     providers:
       kubernetesCRD:
         allowCrossNamespace: true
