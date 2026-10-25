@@ -1,9 +1,6 @@
 # 旧構成の nginx-exporter (nginxのstub_status) はnginx retireに伴い廃止。
 # 代わりにTraefikのPrometheusメトリクス(infra/k3s/traefik-config.yamlで
-# metrics.prometheus.enabled: trueを設定済み)をスクレイプする。
-# ただしTraefik Serviceが実際に9100番を公開しているかはHelmチャートの
-# バージョンに依存するため、初回適用後 `kubectl get svc -n kube-system traefik`
-# で `metrics` ポートが存在することを確認し、名前/番号が違えば下記を調整すること。
+# metrics.prometheus.enabled: trueを設定済み)をPodから直接スクレイプする。
 #
 # kubernetes-apiservers / kubelet / cadvisor の3ジョブは、Prometheus公式が
 # 配布している標準的なin-cluster discoveryレシピ(kubernetes_sd_configs)を
@@ -23,9 +20,22 @@ data:
       - job_name: 'node-exporter'
         static_configs:
           - targets: ['node-exporter:9100']
+      # Traefik HelmチャートはmetricsポートをServiceに公開しない(expose.default: false)
+      # ため、Serviceではなくkubernetes_sd_configsでPodを直接発見してスクレイプする。
       - job_name: 'traefik'
-        static_configs:
-          - targets: ['traefik.kube-system.svc.cluster.local:9100']
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [kube-system]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            action: keep
+            regex: traefik
+          - source_labels: [__meta_kubernetes_pod_container_port_number]
+            action: keep
+            regex: '9100'
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
       - job_name: 'kube-state-metrics'
         static_configs:
           - targets: ['kube-state-metrics:8080']
