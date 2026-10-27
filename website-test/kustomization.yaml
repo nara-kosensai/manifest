@@ -14,4 +14,4 @@ resources:
 images:
 - name: ghcr.io/fumikun/2026kosensai-website
   newName: ghcr.io/fumikun/2026kosensai-website
-  newTag: 6452f7e393a30fe3330335a79664f142071ec669
+  newTag: 9b96d45677a6b201a5ae1b1963c38288c5104b77
