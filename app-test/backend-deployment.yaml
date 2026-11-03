@@ -23,6 +23,13 @@ spec:
           envFrom:
             - secretRef:
                 name: app-env
+          env:
+            # deploy-test.ymlがGitHub Secretから作成するSecret(ArgoCD管理対象外)
+            - name: TURNSTILE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: turnstile
+                  key: TURNSTILE_SECRET_KEY
           readinessProbe:
             tcpSocket:
               port: 8081

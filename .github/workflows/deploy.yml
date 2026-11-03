@@ -5,7 +5,6 @@ name: Sync manifest repo to k3s bootstrap
 # 直接手を出すのは、ArgoCDに委譲できない部分だけ:
 # - k3sブートストラップ(k3s/、traefik-config等の manifests/ 再配置)
 # - Cloudflare IP allowlist(k3s/cloudflare-ip-allowlist.sh)の再適用
-# - app-env(prod.env/staging.env)のVPSへの同期
 # - ArgoCD自体のインストール(argocd/、chicken-and-egg問題を避けるためArgoCDの
 #   管理対象外としこのCIが恒久的にapplyする)
 #
@@ -79,17 +78,6 @@ jobs:
             StrictHostKeyChecking no
             ProxyCommand /tmp/cloudflared/cloudflared access tcp --hostname ${{ secrets.SSH_HOST }} --id ${{ secrets.CLOUDFLARED_CLIENT_ID }} --secret ${{ secrets.CLOUDFLARED_CLIENT_SECRET }} --destination 127.0.0.1:22
           EOF2
-
-      # 2026kosensaiアプリの app-env Secret(DB/pgAdmin/CORS等)の元データ。
-      # Infisicalは使わず、このリポジトリにコミットされた prod.env / staging.env を
-      # そのままVPSに同期する(2026kosensaiリポジトリのdeploy-prod.yml/deploy-test.ymlが
-      # `--from-env-file` でこのパスを直接参照する)。dev.env / backend-dev.envは
-      # ローカル開発専用でVPSには同期しない。
-      - name: Sync app-env files for 2026kosensai
-        run: |
-          ssh vps "mkdir -p /home/github/app-env"
-          scp prod.env vps:/home/github/app-env/prod.env
-          scp staging.env vps:/home/github/app-env/staging.env
 
       # GitHub ActionsはVPSに `github` ユーザーとしてSSH接続するため、
       # そのユーザー自身のホーム配下(/home/github)に配置する。`github`ユーザーは

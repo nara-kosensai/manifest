@@ -1,0 +1,21 @@
+# 隔離されたk8s環境内で完結するため、パスワードは意図的にハードコードしている。
+# (Infisical・VPS上のenvファイル同期は使わない)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-env
+type: Opaque
+stringData:
+  API_INTERNAL_URL: "http://backend:8080"
+  BACKEND_PORT: "8081"
+  CORS_ALLOW_ORIGINS: "http://localhost:3001,http://127.0.0.1:3001"
+  DB_HOST: "db"
+  DB_PORT: "5432"
+  DB_SSLMODE: "disable"
+  ENVIRONMENT: "stage"
+  FRONTEND_PORT: "3001"
+  IMAGE_SIGNING_SECRET: "kosensai-2026-image-signing-secret"
+  POSTGRES_DB: "app"
+  POSTGRES_PASSWORD: "password"
+  POSTGRES_USER: "user"
+  VITE_API_PUBLIC_URL: "https://dev-api.nara-kosensai.com"

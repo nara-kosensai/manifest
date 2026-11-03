@@ -5,6 +5,7 @@ namespace: test
 
 resources:
 - namespace.yaml
+- app-env.yaml
 - ../ingress
 - backend-deployment.yaml
 - backend-service.yaml
