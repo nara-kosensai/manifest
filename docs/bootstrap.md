@@ -28,6 +28,7 @@
    cloudflared tunnel route dns nara-kosensai-web grafana.nara-kosensai.com
    cloudflared tunnel route dns nara-kosensai-web info-check.nara-kosensai.com
    cloudflared tunnel route dns nara-kosensai-web argocd.nara-kosensai.com
+   cloudflared tunnel route dns nara-kosensai-web traefik.nara-kosensai.com
    ```
    生成される `credentials.json` を、VPS上で直接k8s Secretとして投入する:
    ```
@@ -35,7 +36,9 @@
    kubectl -n network create secret generic cloudflared-credentials \
      --from-file=credentials.json=./credentials.json
    ```
-3. **pgAdmin用Cloudflare Accessポリシー**: `pgadmin*.nara-kosensai.com` に対して
+3. **pgAdmin / Traefik Web UI用Cloudflare Accessポリシー**: `traefik.nara-kosensai.com`
+   (Traefikダッシュボード、Traefik側に認証なし)にも必ず同様のAccessポリシーを設定すること。
+   `pgadmin*.nara-kosensai.com` に対して
    Cloudflareダッシュボード側でAccessアプリケーション(認証ポリシー)を設定する。
 4. **Grafanaの秘密情報を投入**(`grafana/docker-compose.yml` は `.gitignore`済み、
    埋め込まれていた `GF_SECURITY_ADMIN_PASSWORD` と `GF_AUTH_GITHUB_CLIENT_SECRET` を使う):

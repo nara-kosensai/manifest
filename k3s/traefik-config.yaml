@@ -62,6 +62,14 @@ spec:
       rollingUpdate:
         maxUnavailable: 1
         maxSurge: 0
+    # Traefik Web UI(ダッシュボード)。Helmチャート標準のIngressRouteは作らず
+    # (ingressRoute.dashboard.enabled: false)、下記の専用IngressRouteで
+    # `web`エントリーポイント(Tunnel経由)のみに公開する。
+    api:
+      dashboard: true
+    ingressRoute:
+      dashboard:
+        enabled: false
     providers:
       kubernetesCRD:
         allowCrossNamespace: true
@@ -79,3 +87,22 @@ spec:
           headers:
             names:
               CF-Connecting-IP: keep
+---
+# Traefik Web UI。traefik.nara-kosensai.com をCloudflare Tunnel経由で公開する。
+# TraefikにはBasic認証等を付けず、pgAdminと同様にCloudflare Access
+# (traefik.nara-kosensai.com に対するAccessアプリケーション)で保護する。
+# Access未設定のまま公開しないこと(docs/bootstrap.md参照)。
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: traefik-dashboard
+  namespace: kube-system
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`traefik.nara-kosensai.com`)
+      services:
+        - name: api@internal
+          kind: TraefikService
