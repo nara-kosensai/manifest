@@ -1,0 +1,11 @@
+# 外部(インターネット)からは使わせない経路に付ける。許可元をループバックだけにして、
+# Ingress経由のリクエストはすべて 403 にする(クラスタ内のサービス間通信は Ingress を通らないので影響しない)。
+# 例: 来場者アプリの管理者向けAPI /2026/app/api/v1/admin/(kosensai hr がクラスタ内から直接呼ぶ)。
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: deny-external
+spec:
+  ipAllowList:
+    sourceRange:
+      - 127.0.0.1/32

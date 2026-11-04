@@ -23,6 +23,15 @@ spec:
           envFrom:
             - secretRef:
                 name: app-env
+          env:
+            # kosensai hr 向けの全得票数API(/api/v1/admin/votes)のトークン。Secret が無ければAPIは無効。
+            # 作成: kubectl -n prod create secret generic vote-admin --from-literal=VOTE_ADMIN_TOKEN=$(openssl rand -hex 32)
+            - name: VOTE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vote-admin
+                  key: VOTE_ADMIN_TOKEN
+                  optional: true
           readinessProbe:
             tcpSocket:
               port: 8081

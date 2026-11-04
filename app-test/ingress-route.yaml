@@ -97,6 +97,15 @@ spec:
         - name: frontend
           port: 3000
     # 画像・APIはbackendへ。バックエンドのルートは/api/...なので/2026/appを剥がす。
+    # 管理者向けAPIはクラスタ内(kosensai hr)からだけ使う。外部からは拒否する。
+    - kind: Rule
+      priority: 86
+      match: Host(`test.nara-kosensai.com`) && PathPrefix(`/2026/app/api/v1/admin/`)
+      middlewares:
+        - name: deny-external
+      services:
+        - name: backend
+          port: 8080
     - kind: Rule
       priority: 85
       match: Host(`test.nara-kosensai.com`) && PathPrefix(`/2026/app/api/`)

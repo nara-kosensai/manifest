@@ -43,6 +43,20 @@ spec:
           envFrom:
             - secretRef:
                 name: hr-env
+          env:
+            # 高専祭来場者アプリ(本番)の得票数。クラスタ内のサービスへ直接つなぐ。
+            - name: VOTES_API_URL
+              value: "http://backend.prod.svc.cluster.local:8080"
+            - name: VOTES_CANDIDATES_URL
+              value: "http://frontend.prod.svc.cluster.local:3000/2026/app/vote-candidates.json"
+            # prod の vote-admin と同じ値。作成:
+            # kubectl -n hr create secret generic vote-admin --from-literal=VOTE_ADMIN_TOKEN=<prodと同じ値>
+            - name: VOTES_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vote-admin
+                  key: VOTE_ADMIN_TOKEN
+                  optional: true
           lifecycle:
             preStop:
               exec:
