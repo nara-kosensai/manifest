@@ -18,7 +18,7 @@ resources:
 images:
 - name: ghcr.io/fumikun/2026kosensai-backend
   newName: ghcr.io/fumikun/2026kosensai-backend
-  newTag: 82447aba436cda791bc0e1e0ca30699ee0c50207
+  newTag: 431cf37fbbe0684f0eb4d925c603ee0d3c92dc19
 - name: ghcr.io/fumikun/2026kosensai-frontend
   newName: ghcr.io/fumikun/2026kosensai-frontend
-  newTag: b995bb1aa0b1c14ae3b5646440431e4ac37aada3
+  newTag: 431cf37fbbe0684f0eb4d925c603ee0d3c92dc19
