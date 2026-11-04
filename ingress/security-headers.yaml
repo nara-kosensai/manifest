@@ -20,14 +20,18 @@ spec:
       X-Content-Type-Options: nosniff
       # Google Tag Manager(gtag.js)とGoogle Fontsを許可(script-src/style-src/
       # font-src/connect-src)。Google Mapsの埋め込み(iframe)用にframe-srcへ
-      # https://www.google.comも許可。それ以外は旧nginx設定のCSPを踏襲。
+      # https://www.google.comも許可。Cloudflare Turnstile(投票の認証)用に
+      # script-src/frame-srcへhttps://challenges.cloudflare.comを許可。
+      # それ以外は旧nginx設定のCSPを踏襲。
       Content-Security-Policy: >-
         default-src 'self'; style-src 'self' 'unsafe-inline'
         https://fonts.googleapis.com; font-src 'self'
         https://fonts.gstatic.com; frame-src 'self'
-        https://www.youtube.com https://www.google.com; img-src 'self' data:; script-src 'self'
+        https://www.youtube.com https://www.google.com
+        https://challenges.cloudflare.com; img-src 'self' data:; script-src 'self'
         'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com
-        https://www.googletagmanager.com; connect-src 'self'
+        https://www.googletagmanager.com https://challenges.cloudflare.com;
+        connect-src 'self'
         https://nara-kosensai.com https://www.google-analytics.com
         https://analytics.google.com;
       Strict-Transport-Security: "max-age=63072000"
