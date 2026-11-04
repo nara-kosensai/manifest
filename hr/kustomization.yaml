@@ -19,4 +19,4 @@ resources:
 images:
 - name: ghcr.io/fumikun/hr
   newName: ghcr.io/fumikun/hr
-  newTag: 9425fa0cb6586114902d37f1f527b5eed518f17f
+  newTag: ae44cb3cb87a20b80ffa7607ce085914ed8f6bff
