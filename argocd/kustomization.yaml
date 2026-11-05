@@ -14,10 +14,12 @@ resources:
   - ../ingress
   - argocd-route.yaml
   - argocd-expo-route.yaml
+  - argocd-custom-css.yaml
 
 patches:
   - path: argocd-cm-patch.yaml
   - path: argocd-rbac-cm-patch.yaml
   - path: argocd-cmd-params-cm-patch.yaml
   - path: argocd-notifications-cm-patch.yaml
+  - path: argocd-server-custom-css-patch.yaml
   - path: scale-down-unused.yaml

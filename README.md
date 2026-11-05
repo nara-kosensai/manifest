@@ -1,129 +1,92 @@
 # nara-kosensai/manifest
 
-nara-kosensai(奈良高専祭)のインフラ設定リポジトリ。単一VPS上のシングルノードk3s
-クラスタの**全k8sマニフェスト**(クラスタブートストラップ、共有プラットフォーム設定、
-アプリ本体、website)をこの1リポジトリに集約している。外部通信は原則Cloudflare Tunnel
-経由のみで、実際のマニフェストapplyはArgoCD(GitOps)が本リポジトリを直接git pullして行う。
+**奈良高専祭のWebサイトを動かしている「設定ファイルの全部」を置いたリポジトリです。**
 
-## ドキュメント
+高専祭のサイト(公式サイト、出店・企画情報、シフト調整システム、過去年度のアーカイブなど)は、
+1台のサーバー(VPS)の上で動いています。このリポジトリには、そのサーバーに
+「何を、どう動かすか」が書かれたファイルがすべて入っていて、**ここを書き換えるだけで
+本番のサイトが自動で更新されます**。
 
-| ドキュメント | 内容 |
+## ひとことで言うと
+
+```
+開発者が変更を push
+   ↓
+GitHub(このリポジトリ)に設定が保存される
+   ↓
+ArgoCD が変更を検知して、サーバーを自動で書き換える
+   ↓
+サイトが更新される
+```
+
+このような「設定をGitで管理し、自動でサーバーに反映する」やり方を **GitOps** と呼びます。
+手作業でサーバーに入って操作しないので、ミスが起きにくく、
+いつ・誰が・何を変えたかが全部履歴に残ります。
+
+## 使っている技術
+
+| 技術 | 役割 |
 | --- | --- |
-| [docs/architecture.md](docs/architecture.md) | システム構成・ネットワーク/セキュリティ・シークレット管理・CI/CDパイプラインの仕様書。設計判断の記録もここ |
-| [docs/operations.md](docs/operations.md) | 既知の障害と診断・対処手順(トラブルシュート用) |
-| [docs/bootstrap.md](docs/bootstrap.md) | 新規VPSにゼロから構築する場合の一度きりの手動セットアップ手順 |
+| **Kubernetes(k3s)** | アプリを動かす基盤。1台のサーバー上で軽量版のk3sを使用 |
+| **ArgoCD** | このリポジトリを見張り、変更をサーバーに自動反映する(GitOps) |
+| **Kustomize** | Kubernetesの設定ファイルをまとめて管理する仕組み |
+| **Cloudflare Tunnel** | サーバーのポートを開けずに、安全に外部へ公開する |
+| **Traefik** | 受け取ったリクエストを、各アプリに振り分ける |
+| **Prometheus / Loki / Grafana** | サーバーの状態とログを集めて見える化する(監視) |
+| **GitHub Actions** | アプリのビルドとデプロイを自動化する(CI/CD) |
+| **PostgreSQL** | アプリのデータベース |
+
+## ここで動いているもの
+
+| 場所 | 内容 |
+| --- | --- |
+| `app-prod/` `app-test/` | 高専祭アプリ本体(バックエンド・フロントエンド・データベース)。`prod`が本番、`test`が動作確認用 |
+| `website-prod/` `website-test/` | 高専祭の公式Webサイト(Astro製) |
+| `hr/` | シフト調整システム |
+| `web-static/` | 過去年度のサイトのアーカイブ、Storybook、掲載情報プレビューツール |
+| `monitoring/` | 監視(Grafana, Prometheus, Loki など) |
+| `network/` | 外部公開の入口(Cloudflare Tunnel) |
+| `pgadmin/` | データベースの管理画面 |
+| `ingress/` | 全アプリ共通のセキュリティ設定 |
+| `argocd/` `applications/` | ArgoCD本体と、「何をデプロイするか」の定義 |
+| `k3s/` | サーバー自体の初期セットアップ |
+| `docs/` | 設計や運用の詳しいドキュメント |
+
+## 工夫しているところ
+
+- **ポートを公開しない**: 外部との通信は原則Cloudflare Tunnel経由。サーバー側から
+  外に向かってつなぐので、外から直接攻撃できる入口をほとんど作っていません。
+- **本番は証明書で守る**: 本番サイトはCloudflareからの通信であることを証明書(mTLS)で
+  確認し、それ以外の接続は受け付けません。
+- **全部コードで管理**: サーバーの状態はすべてこのリポジトリに書かれているので、
+  サーバーが壊れても、同じ設定からもう一度作り直せます。
+- **変更は自動・履歴付き**: デプロイは自動化され、結果はチャットにも通知されます。
 
 ## リポジトリの役割分担
 
-**k8sマニフェストはすべてこの`manifest`リポジトリに集約する。** 他のリポジトリは
-イメージのビルド・pushと、このリポジトリへのマニフェスト更新(イメージタグ書き換え)
-commit&pushだけを行う。
+設定(Kubernetesのマニフェスト)はすべてこのリポジトリに集約し、
+アプリのソースコードは別のリポジトリに置いています。
 
 | リポジトリ | 内容 |
 | --- | --- |
-| `manifest`(このリポジトリ) | 全k8sマニフェスト(クラスタブートストラップ`k3s/`、ArgoCD本体`argocd/`、Application定義`applications/`、共有プラットフォーム設定、アプリ本体、website)、ドキュメント |
-| `2026kosensai` | アプリ本体(backend/frontend/db/website)のDockerfile・CI。CIはイメージをbuild/pushした後、本リポジトリの`app-{prod,test}/`・`website-{prod,test}/`配下の`kustomization.yaml`を`kustomize edit set image`で書き換えてcommit&pushする |
-| `fumikun/hr` | シフト調整システムのDockerfile・CI。CIはイメージをbuild/pushした後、本リポジトリの`hr/kustomization.yaml`を`kustomize edit set image`で書き換えてcommit&pushする(ArgoCD Application `hr`が自動sync) |
-| `www` | 過去年度アーカイブの中身と、そのイメージをビルドするDockerfile/CI(デプロイ先マニフェストは本リポジトリの`web-static/`) |
+| `manifest`(ここ) | サーバーに何をどう動かすかの設定すべて |
+| `2026kosensai` | 高専祭アプリ本体・公式サイトのソースコード。ビルド後、このリポジトリのイメージタグを更新する |
+| `fumikun/hr` | シフト調整システムのソースコード |
+| `www` | 過去年度アーカイブの中身 |
 
-新しく何かを追加するとき: そのアプリ/サービス固有のコード(Dockerfile、アプリの
-ソース)は該当サービスのリポジトリへ。k8sマニフェスト(Deployment/Service/
-IngressRoute/namespace定義等)はすべてこの`manifest`リポジトリへ置く。
+## もっと詳しく知りたい方へ
 
-## 構成
-
-```
-manifest/
-  k3s/            # クラスタ自体のブートストラップ(k3sインストール時に1回、以後は変更時のみ再適用)
-  argocd/         # ArgoCD本体のインストール(manifestのCIが恒久的にapply)
-  applications/   # ArgoCDが管理するApplication定義(App-of-apps)
-  network/        # cloudflared(公開Web用Tunnel)
-  monitoring/     # Grafana, Loki, Prometheus, node-exporter, kube-state-metrics
-  pgadmin/        # prod/test共通の統合pgAdminインスタンス
-  hr/             # fumikun/hr(シフト調整システム。app + PostgreSQL)
-  web-static/     # 過去年度アーカイブ(www-archive) + storybook + kosensai-form-preview
-  app-prod/       # アプリ本体(backend/frontend/db)prod環境
-  app-test/       # アプリ本体(backend/frontend/db)test環境
-  website-prod/   # website prod環境
-  website-test/   # website test環境
-  ingress/        # 全namespace共通のセキュリティヘッダーMiddleware(security-headers)
-  docs/           # architecture.md / operations.md / bootstrap.md
-  *.env           # アプリ用の環境変数(下記参照)
-```
-
-各サービスディレクトリはそれぞれ独立した`kustomization.yaml`を持ち、単体で
-`kubectl kustomize <dir>`できる(traPの`manifest`と同様、階層化されたbase/overlaysは
-使わない)。namespaceが異なる複数のリソース群をまとめて扱う必要がある場合のみ、
-ディレクトリ内で`namespace.yaml`を含めて定義する。
-
-- `k3s/install.sh` — k3sインストール(`--disable=servicelb`)。
-- `k3s/traefik-config.yaml` — Traefikの`service.type: ClusterIP`化(公開ポート非公開)。
-- `k3s/alloy-logging.yaml` — Grafana AlloyのDaemonSet(全namespaceのPodログをLokiへ)。
-- `k3s/local-path-retain-storageclass.yaml` — 消えて困るデータ用の`Retain`StorageClass。
-- `ingress/security-headers.yaml` — 全namespace共通のセキュリティヘッダーMiddleware。
-- `argocd/` — ArgoCD本体のインストール(namespace, upstream install
-  manifest, `argocd-cm`/`argocd-cmd-params-cm`/`argocd-notifications-cm`パッチ,
-  `argocd.nara-kosensai.com`へのIngressRoute)。
-- `applications/` — ArgoCDが管理するApplication定義(App-of-apps)。`root-app.yaml`
-  だけを一度きり手動でapplyすれば、以降はこのディレクトリ自体もgit経由でArgoCDが管理する。
-- `app-prod/`・`app-test/` — backend/frontend/db(StatefulSet)と、そのnamespace(prod/test)
-  全体のIngressRoute/Middleware(旧nginxルーティングの移植、
-  [docs/architecture.md](docs/architecture.md)参照)。
-- `website-prod/`・`website-test/` — Astro製website(`app-{prod,test}/`と同じnamespaceに
-  デプロイされるが、イメージタグ更新のタイミングが異なるため別Application)。
-
-詳細な設計判断・namespace構成・ネットワーク経路は[docs/architecture.md](docs/architecture.md)
-を参照。
-
-## ArgoCD(GitOps)
-
-- マニフェスト本体のapplyはArgoCDがこの`manifest`リポジトリを直接git pullして行う。
-  `manifest`・`2026kosensai`・`www`各リポジトリのCIは「namespace作成・Secret投入
-  (ArgoCDの管理対象外)」と、`2026kosensai`/`www`側では追加で「イメージbuild/push後、
-  `kustomize edit set image`で書き換えたマニフェストのタグをこの`manifest`リポジトリに
-  commit&push」だけを行う。
-- ArgoCD UIは`https://argocd.nara-kosensai.com`でCloudflare Tunnel + Access経由公開。
-- デプロイ結果はArgoCD UIに加え、Teams(Power Automate webhook)にも通知される
-  (`argocd/argocd-notifications-cm-patch.yaml`)。
-- 各Applicationの定義は`applications/`を参照。
-
-**新しいApplicationやリポジトリを追加する場合の注意**：Applicationは初回、
-`syncPolicy.automated`を付けずに(手動sync)作成し、`argocd app diff <name>`で
-「差分なし」であることを確認してから`automated`(prune+selfHeal)に変更すること。
-既に本番で稼働中のリソースに対して、gitとの差分がある状態でいきなり自動syncを
-有効にすると意図しないロールバック/再作成が起きうる。
-
-## app-env(アプリの環境変数)
-
-`prod.env` / `staging.env` / `dev.env` / `backend-dev.env` はアプリ本体
-(backend/frontend/website/pgadmin)の環境変数。DBはk8s ClusterIP内に閉じており外部
-到達不能なため、このリポジトリで平文コミットを許容している。
-
-| ファイル | 用途 |
+| ドキュメント | 内容 |
 | --- | --- |
-| `prod.env` | `prod` namespace(`app-env` Secret) |
-| `staging.env` | `test` namespace(`app-env` Secret) |
-| `dev.env` / `backend-dev.env` | ローカル開発用(docker-compose等)。VPSには同期しない |
+| [docs/architecture.md](docs/architecture.md) | システム構成、ネットワークとセキュリティ、CI/CDの詳しい仕様と設計判断 |
+| [docs/operations.md](docs/operations.md) | 過去の障害と、その診断・対処の記録 |
+| [docs/bootstrap.md](docs/bootstrap.md) | 新しいサーバーにゼロから構築する手順 |
 
-このリポジトリのCI(`deploy.yml`)が`prod.env`/`staging.env`をVPSの
-`/home/github/app-env/{prod,staging}.env`に同期し、`2026kosensai`リポジトリのCIが
-そのパスを直接`--from-env-file`で使う(2026kosensai側のCIより先に、このリポジトリの
-CIが一度動いている必要がある)。
-
-`CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`はここには含めない
-(GitHub Actions Secretとして`2026kosensai`側で別途管理)。
-
-Infisical(自己ホスト)は完全に廃止済み。シークレット管理の詳細は
-[docs/architecture.md#シークレット管理](docs/architecture.md#シークレット管理)を参照。
-
-## ローカルでの動作確認
+## 設定を手元で確認する
 
 ```sh
-for dir in network monitoring pgadmin hr web-static app-prod app-test website-prod website-test; do
-  kubectl kustomize "$dir"                       # レンダリング確認
-  kubectl apply --dry-run=server -k "$dir"
-done
-kubectl kustomize argocd     # ArgoCD自体のレンダリング確認
+kubectl kustomize hr    # 例: hr の設定が最終的にどうなるかを表示
 ```
 
-新しいVPSでゼロから構築する手順は[docs/bootstrap.md](docs/bootstrap.md)を参照。
+各ディレクトリは独立した`kustomization.yaml`を持ち、上のコマンドで単体でレンダリングして
+確認できます。

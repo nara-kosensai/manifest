@@ -33,6 +33,14 @@ spec:
         - name: argocd-server
           port: 80
     - kind: Rule
+      priority: 500
+      match: Host(`exhibit-a.nara-kosensai.com`) && Path(`/custom/style.css`)
+      middlewares:
+        - name: argocd-expo-css
+      services:
+        - name: argocd-server
+          port: 80
+    - kind: Rule
       priority: 100
       match: Host(`exhibit-a.nara-kosensai.com`) && (Method(`GET`) || Method(`HEAD`))
       middlewares:
@@ -40,3 +48,13 @@ spec:
       services:
         - name: argocd-server
           port: 80
+---
+# 展示用ホストにだけ、操作ボタンを隠すCSS(expo.css)を返す。
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: argocd-expo-css
+  namespace: argocd
+spec:
+  replacePath:
+    path: /custom/expo.css

@@ -1,0 +1,16 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-server
+spec:
+  template:
+    spec:
+      containers:
+        - name: argocd-server
+          volumeMounts:
+            - name: custom-css
+              mountPath: /shared/app/custom
+      volumes:
+        - name: custom-css
+          configMap:
+            name: argocd-custom-css

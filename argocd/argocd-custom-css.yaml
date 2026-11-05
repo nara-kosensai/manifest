@@ -1,0 +1,27 @@
+# ArgoCD UIのカスタムCSS。argocd-cmのui.cssurl(./custom/style.css)から読み込まれ、
+# argocd-serverの/shared/app/customにマウントされる(argocd-server-custom-css-patch.yaml)。
+#
+# style.css      : 管理用ホスト(argocd.*)が読むもの。何も変えない。
+# expo.css       : 展示用ホスト(exhibit-a.*)だけが読むもの。Traefikが
+#                  /custom/style.css → /custom/expo.css に書き換える(argocd-expo-route.yaml)。
+#
+# これは見た目を隠すだけ。操作そのものはTraefikのGET/HEAD限定とRBAC(role:expo)で既に拒否している。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-custom-css
+data:
+  style.css: |
+    /* 管理用ホストでは何も変更しない */
+  expo.css: |
+    /* アプリ一覧: NEW APP / SYNC APPS / REFRESH APPS */
+    [qe-id="applications-list-button-new-app"],
+    [qe-id="applications-list-button-sync"],
+    [qe-id="applications-list-button-refresh"] {
+      display: none !important;
+    }
+    /* アプリ詳細: DETAILS / SYNC / REFRESH / DELETE などの操作ボタン */
+    .application-details .top-bar__actions,
+    .application-details [qe-id^="application-details-button"] {
+      display: none !important;
+    }

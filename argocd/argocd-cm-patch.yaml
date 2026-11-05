@@ -13,3 +13,5 @@ metadata:
   name: argocd-cm
 data:
   users.anonymous.enabled: "true"
+  # 展示用ホストだけ操作ボタンを隠すCSSを読ませる(詳細はargocd-custom-css.yaml)。
+  ui.cssurl: "./custom/style.css"

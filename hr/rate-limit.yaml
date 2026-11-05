@@ -38,8 +38,6 @@ spec:
     sourceCriterion:
       requestHeaderName: CF-Connecting-IP
 ---
-# 奈良高専（国立高等専門学校機構 202.24.240.0/21、SINET 経由）からの接続用。校内Wi-Fiは同じ出口IPに
-# 多数の人が相乗りするため、同時接続とレートを緩める。/api/auth/* は対象外（hr-auth-rate-limit のまま）。
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
