@@ -1,7 +1,15 @@
-# CLIログイン時のリダイレクト先や通知リンクに使われる公開URL。
+# url(公開URL)は意図的に設定しない: 設定すると/api/v1/settingsに含まれ、展示用ホスト
+# (exhibit-a.*)から管理用ホスト名が見えてしまうため。urlが必要になるのはSSO(dex/OIDC)の
+# リダイレクトだが、SSOは使っていない(scale-down-unused.yaml)。通知内のリンクは
+# argocd-notifications-cm-patch.yamlのcontext.argocdUrlで別途指定している。
+#
+# users.anonymous.enabled: 展示用PC(exhibit-a.nara-kosensai.com)からログインなしで
+# 閲覧させるため匿名アクセスを有効にする。匿名ユーザーの権限はargocd-rbac-cmの
+# policy.default(role:expo、閲覧のみ・ログ不可)で絞る。argocd.nara-kosensai.com側も
+# 匿名で閲覧できるようになるが、そちらはCloudflare Accessの内側なので影響しない。
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: argocd-cm
 data:
-  url: https://argocd.nara-kosensai.com
+  users.anonymous.enabled: "true"

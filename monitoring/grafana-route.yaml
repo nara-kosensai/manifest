@@ -13,3 +13,33 @@ spec:
       services:
         - name: grafana
           port: 3000
+---
+# 展示用PC向けのGrafana(公開ダッシュボードのみ)。
+#
+# ホスト名は管理用ホスト(grafana.*)を推測されないよう、中身と無関係な名前にしている。
+# Grafanaへは直接ではなく、レスポンス中の管理用ホスト名を書き換える
+# grafana-expo-proxy(grafana-expo-proxy.yaml)を経由させる。
+# exhibit-b.nara-kosensai.com はCloudflareエッジのクライアント証明書+WAFルールで
+# 展示用PC以外を遮断する(docs/architecture.md「展示用PC向けホスト」)。
+# Grafana本体は匿名アクセスを有効にせず(有効にするとgrafana.*側にも効いてしまう)、
+# Grafanaの「公開ダッシュボード」機能で作ったダッシュボードだけを見せる。
+# そのため、このホストでは公開ダッシュボードの表示に必要なパスだけをルーティングし、
+# ログイン画面・通常のAPI等はTraefikの404になる:
+#   /public-dashboards/  公開ダッシュボードのページ
+#   /api/public/         公開ダッシュボードのデータ取得API
+#   /public/             静的アセット(JS/CSS/プラグイン)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: grafana-expo
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`exhibit-b.nara-kosensai.com`) && (PathPrefix(`/public-dashboards/`) || PathPrefix(`/api/public/`) || PathPrefix(`/public/`))
+      middlewares:
+        - name: security-headers
+      services:
+        - name: grafana-expo-proxy
+          port: 8080

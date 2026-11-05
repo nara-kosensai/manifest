@@ -8,6 +8,7 @@ resources:
   - ../ingress
   - grafana.yaml
   - grafana-route.yaml
+  - grafana-expo-proxy.yaml
   - kube-state-metrics.yaml
   - loki.yaml
   - node-exporter.yaml

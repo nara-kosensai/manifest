@@ -15,6 +15,7 @@
 - [ネットワーク・セキュリティ](#ネットワークセキュリティ)
   - [公開ポート](#公開ポート)
   - [TLS / mTLS](#tls--mtls)
+  - [展示用PC向けホスト](#展示用pc向けホスト)
   - [RBAC](#rbac)
 - [シークレット管理](#シークレット管理)
 - [CI/CDパイプライン](#cicdパイプライン)
@@ -243,6 +244,56 @@ spec:
 ```
 
 *(ソースコード: prod IngressRouteのTLS設定(`app-prod/ingress-route.yaml`))*
+
+### 展示用PC向けホスト
+
+文化祭の展示用PC(来場者が触れるWindows端末、管理者権限なし)だけから、ArgoCDと
+Grafanaを閲覧させるための専用ホスト。既存の`argocd.*` / `grafana.*`(Cloudflare
+Access・GitHub OAuthで運用者のみ)とは別ホストにし、運用者向けの認証には手を入れない。
+
+| ホスト | 転送先 | 見せる範囲 |
+| --- | --- | --- |
+| `exhibit-a.nara-kosensai.com` | `argocd/argocd-server` | 匿名ユーザー=`role:expo`(Application/Projectの閲覧のみ、Podログ不可)。TraefikでGET/HEAD以外をルーティングしない(ログイン・Sync等の操作は不可)。リソースのmanifest・イベントを返すAPIは403 |
+| `exhibit-b.nara-kosensai.com` | `monitoring/grafana-expo-proxy` → `grafana` | Grafanaの公開ダッシュボードのみ(`/public-dashboards/`, `/api/public/`, `/public/`以外はTraefikの404)。Grafana本体の匿名アクセスは無効のまま |
+
+*(表: 展示用PC向けホスト)*
+
+**アクセス制御はCloudflareエッジのクライアント証明書(mTLS)で行う。** 本番の
+Origin Authentication(Cloudflare→オリジン間)とは逆向きで、ブラウザ→Cloudflare間の
+mTLSである。
+
+- `SSL/TLS > Client Certificates`でCloudflare管理CAのクライアント証明書を発行し、
+  上記2ホストでmTLSを有効化する。
+- WAFカスタムルールで、有効な(失効していない)証明書を提示しないリクエストをBlockする。
+- 証明書は展示用PCの「現在のユーザー」証明書ストアに入れる(管理者権限不要、秘密鍵は
+  エクスポート不可)。紛失・流出時はダッシュボードから失効させる。
+
+**展示用ホストから管理用ホスト名を推測させない。** 来場者が見るURLや画面から
+`argocd.*` / `grafana.*`が分からないよう、次の対策をしている(新しい展示用ホストを
+足すときも同じ観点で確認すること)。
+
+- ホスト名は中身と無関係な`exhibit-a` / `exhibit-b`にする(`argocd-expo`のような
+  元の名前を含む名前にしない)。
+- ArgoCDの`argocd-cm`に`url`を設定しない(`/api/v1/settings`で返ってしまうため。
+  SSOは使っておらず、通知のリンクは`argocd-notifications-cm`の`argocdUrl`で別に持つ)。
+- ArgoCDのリソース詳細API(`managed-resources` / `resource` / `manifests` / `events`)を
+  展示用ホストでは403にする。`cloudflared-config`やIngressRouteのmanifestには全ホスト名が
+  書かれているため。
+- GrafanaはHTMLに`appUrl`(`GF_SERVER_ROOT_URL`)を埋め込むが、root_urlはGitHub OAuthで
+  使うため変えられない。展示用ホストだけnginx(`grafana-expo-proxy`)を挟み、
+  レスポンス中の`grafana.nara-kosensai.com`を`exhibit-b.nara-kosensai.com`に置換する。
+- 公開ダッシュボードの中身(パネルのクエリ結果)に管理用ホスト名が出ないものだけを
+  公開する(例: Traefikのルーター名やアクセスログのHostラベルを表示するパネルは避ける)。
+
+ただし画面を見ればArgoCD/Grafanaであることは分かるので、「argocd.」「grafana.」を
+当てずっぽうで試されることまでは防げない。管理用ホストはこれまで通りCloudflare
+Access / GitHub OAuthで守られている前提である。
+
+VPS側で直接クライアント証明書を検証する構成(nginx等)は採らない: 443/tcpは
+Cloudflare IPレンジ以外をnftablesでdropしており(上記「公開ポート」)、`web`
+entrypointはTunnel経由でTLSがCloudflareで終端済みのため、オリジンでは展示用PCの
+証明書を見られないため。Cloudflare Accessのmutual TLSルールもプランの制約があるため
+使わない。
 
 ### RBAC
 

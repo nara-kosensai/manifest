@@ -1,0 +1,13 @@
+# 匿名ユーザー(展示用PC)とロール未割当ユーザーに適用されるデフォルトロール。
+# 組み込みのrole:readonlyはPodログ(logs, get)まで見えてしまうため使わず、
+# Application/Projectの閲覧だけを許す専用ロールにする。Secretの値はArgoCDが
+# UI上で自動的に伏せる。adminは組み込みのrole:adminのまま。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+data:
+  policy.default: role:expo
+  policy.csv: |
+    p, role:expo, applications, get, */*, allow
+    p, role:expo, projects, get, *, allow

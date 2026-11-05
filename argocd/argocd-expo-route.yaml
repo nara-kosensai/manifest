@@ -1,0 +1,42 @@
+# 展示用PC向けのArgoCD UI(閲覧専用)。
+#
+# ホスト名は管理用ホスト(argocd.*)を推測されないよう、中身と無関係な名前にしている。
+# exhibit-a.nara-kosensai.com はCloudflare Accessを付けず、代わりにCloudflareエッジの
+# クライアント証明書(SSL/TLS > Client Certificates)とWAFカスタムルールで、
+# 証明書をインストールした展示用PC以外を遮断する(手順はdocs/bootstrap.md、
+# 仕組みはdocs/architecture.md「展示用PC向けホスト」)。
+#
+# ArgoCD側は匿名ユーザー=role:expo(閲覧のみ)だが、多層防御としてこのホストでは
+# GET/HEAD以外をルーティングしない(ログインPOST /api/v1/session や
+# Sync等の操作APIはすべてTraefikの404になる)。
+#
+# さらに、リソースの中身(live/desired manifest・イベント)を返すAPIはdeny-externalで
+# 403にする。cloudflared-configのConfigMapや各IngressRouteのmanifestには全ホスト名が
+# 書かれているため。リソースツリー(名前・種類・health)とApplication一覧は見せる。
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: argocd-expo
+  namespace: argocd
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      priority: 1000
+      match: >-
+        Host(`exhibit-a.nara-kosensai.com`) &&
+        PathRegexp(`^/api/v1/applications/[^/]+/(managed-resources|resource|manifests|events)(/|$)`)
+      middlewares:
+        - name: deny-external
+      services:
+        - name: argocd-server
+          port: 80
+    - kind: Rule
+      priority: 100
+      match: Host(`exhibit-a.nara-kosensai.com`) && (Method(`GET`) || Method(`HEAD`))
+      middlewares:
+        - name: security-headers
+      services:
+        - name: argocd-server
+          port: 80

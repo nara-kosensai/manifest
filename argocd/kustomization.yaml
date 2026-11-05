@@ -13,9 +13,11 @@ resources:
   - https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.2/manifests/install.yaml
   - ../ingress
   - argocd-route.yaml
+  - argocd-expo-route.yaml
 
 patches:
   - path: argocd-cm-patch.yaml
+  - path: argocd-rbac-cm-patch.yaml
   - path: argocd-cmd-params-cm-patch.yaml
   - path: argocd-notifications-cm-patch.yaml
   - path: scale-down-unused.yaml

@@ -34,6 +34,11 @@ data:
         service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: argocd.nara-kosensai.com
         service: http://traefik.kube-system.svc.cluster.local:80
+      # 展示用PC専用(クライアント証明書必須、docs/architecture.md「展示用PC向けホスト」)
+      - hostname: exhibit-a.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: exhibit-b.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: hr.nara-kosensai.com
         service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: traefik.nara-kosensai.com
