@@ -6,8 +6,10 @@
 #
 # exhibit-proxy(nginx)を経由してTraefik自身のWeb UIへつなぎ、APIレスポンス中の
 # 管理用ホスト名を伏せ字にする(exhibit-proxy.conf)。
-# Web UIの表示に必要な /dashboard と /api だけを、GET/HEADに限ってルーティングする
+# Web UIの表示に必要な /dashboard/ と /api だけを、GET/HEADに限ってルーティングする
 # (TraefikのAPIはもともと読み取り専用だが、多層防御として)。
+# TraefikのWeb UIは末尾スラッシュ付きの /dashboard/ でしか応答しない(/dashboard は404)ため、
+# / と /dashboard は /dashboard/ へリダイレクトする。
 # security-headersは付けない: traefik.* 側と同じく、CSPでWeb UIが壊れるのを避けるため。
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
@@ -15,7 +17,7 @@ metadata:
   name: exhibit-c-root-redirect
 spec:
   redirectRegex:
-    regex: "^https?://exhibit-c\\.nara-kosensai\\.com/?$"
+    regex: "^https?://exhibit-c\\.nara-kosensai\\.com(/|/dashboard)?$"
     replacement: "https://exhibit-c.nara-kosensai.com/dashboard/"
     permanent: false
 ---
@@ -28,7 +30,8 @@ spec:
     - web
   routes:
     - kind: Rule
-      match: Host(`exhibit-c.nara-kosensai.com`) && Path(`/`)
+      priority: 1000
+      match: Host(`exhibit-c.nara-kosensai.com`) && (Path(`/`) || Path(`/dashboard`))
       middlewares:
         - name: exhibit-c-root-redirect
       services:
