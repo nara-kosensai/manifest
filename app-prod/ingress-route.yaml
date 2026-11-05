@@ -48,7 +48,8 @@ metadata:
 spec:
   stripPrefix:
     prefixes:
-      - /2026/app---
+      - /2026/app
+---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
