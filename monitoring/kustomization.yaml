@@ -8,9 +8,17 @@ resources:
   - ../ingress
   - grafana.yaml
   - grafana-route.yaml
-  - grafana-expo-proxy.yaml
+  - exhibit-proxy.yaml
+  - exhibit-route.yaml
   - kube-state-metrics.yaml
   - loki.yaml
   - node-exporter.yaml
   - prometheus.yaml
   - prometheus-rbac.yaml
+
+# 展示用ホストの書き換えプロキシ(exhibit-proxy.yaml)のnginx設定。
+# 名前にハッシュが付くので、confを変えるとDeploymentが自動で再起動する。
+configMapGenerator:
+  - name: exhibit-proxy
+    files:
+      - default.conf=exhibit-proxy.conf

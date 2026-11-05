@@ -142,20 +142,23 @@
        `nara-kosensai.com` / `www.nara-kosensai.com` のエントリを削除してよい
        (test/admin系は残す)。
 
-15. **展示用PC向けホスト(`exhibit-a.*` / `exhibit-b.*`)**(仕組みは
+15. **展示用PC向けホスト(`exhibit-a.*` / `exhibit-b.*` / `exhibit-c.*`)**(仕組みは
     [architecture.md#展示用pc向けホスト](architecture.md#展示用pc向けホスト)を参照。
     **WAFルールを入れるまでは誰でも到達できる**ため、2〜3を先に済ませてからDNSを向ける):
     1. DNS route(Tunnelのingressは`network/cloudflared-configmap.yaml`に追加済み):
        ```
        cloudflared tunnel route dns nara-kosensai-web exhibit-a.nara-kosensai.com
        cloudflared tunnel route dns nara-kosensai-web exhibit-b.nara-kosensai.com
+       cloudflared tunnel route dns nara-kosensai-web exhibit-c.nara-kosensai.com
        ```
+       cloudflaredは起動時にしか設定を読まないため、ConfigMapがsyncされたら
+       `kubectl -n network rollout restart deployment/cloudflared`で再起動する。
     2. `SSL/TLS > Client Certificates > Create Certificate`でクライアント証明書を発行
        (「Generate private key and CSR with Cloudflare」、有効期間は短いものを選ぶ)。
-       表示されるcert/keyを手元に保存し、同画面の`Hosts`に上記2ホストを追加してmTLSを有効化する。
+       表示されるcert/keyを手元に保存し、同画面の`Hosts`に上記3ホストを追加してmTLSを有効化する。
     3. `Security > WAF > Custom rules`で次の式に一致したら`Block`するルールを作る:
        ```
-       (http.host in {"exhibit-a.nara-kosensai.com" "exhibit-b.nara-kosensai.com"} and (not cf.tls_client_auth.cert_verified or cf.tls_client_auth.cert_revoked))
+       (http.host in {"exhibit-a.nara-kosensai.com" "exhibit-b.nara-kosensai.com" "exhibit-c.nara-kosensai.com"} and (not cf.tls_client_auth.cert_verified or cf.tls_client_auth.cert_revoked))
        ```
     4. 証明書をPKCS#12にまとめ、展示用PCに渡す:
        ```
@@ -168,9 +171,10 @@
        「Share externally」)で公開URLを発行する。展示用PCでは
        `https://exhibit-b.nara-kosensai.com/public-dashboards/<accessToken>`を開く
        (`grafana.*`側の公開URLのホスト部分を差し替える)。
-    6. 確認: 証明書なしの端末から両ホストが403(Cloudflareのブロック画面)になること、
+    6. 確認: 証明書なしの端末から3ホストとも403(Cloudflareのブロック画面)になること、
        展示用PCからは証明書選択ダイアログの後に表示され、ArgoCDでSync/ログイン/
-       Podログが使えないこと。
+       Podログが使えないこと、`exhibit-c`のTraefik Web UIでルーターのホスト名が
+       `*****.nara-kosensai.com`になっていること。
 
 これ以降、共有プラットフォーム設定・アプリ本体・websiteのマニフェストはすべて`manifest`
 への push(`main`ブランチ)でコードから再現・更新される。`2026kosensai`リポジトリの

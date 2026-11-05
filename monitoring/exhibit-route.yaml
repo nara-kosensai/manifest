@@ -1,0 +1,44 @@
+# 展示用PC向けのTraefik Web UI(閲覧専用)。
+#
+# exhibit-c.nara-kosensai.com は exhibit-a/b と同じく、Cloudflareエッジのクライアント証明書
+# +WAFルールで展示用PC以外を遮断する(docs/architecture.md「展示用PC向けホスト」)。
+# ホスト名は管理用ホスト(traefik.*)を推測されないよう、中身と無関係な名前にしている。
+#
+# exhibit-proxy(nginx)を経由してTraefik自身のWeb UIへつなぎ、APIレスポンス中の
+# 管理用ホスト名を伏せ字にする(exhibit-proxy.conf)。
+# Web UIの表示に必要な /dashboard と /api だけを、GET/HEADに限ってルーティングする
+# (TraefikのAPIはもともと読み取り専用だが、多層防御として)。
+# security-headersは付けない: traefik.* 側と同じく、CSPでWeb UIが壊れるのを避けるため。
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: exhibit-c-root-redirect
+spec:
+  redirectRegex:
+    regex: "^https?://exhibit-c\\.nara-kosensai\\.com/?$"
+    replacement: "https://exhibit-c.nara-kosensai.com/dashboard/"
+    permanent: false
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: exhibit-c
+spec:
+  entryPoints:
+    - web
+  routes:
+    - kind: Rule
+      match: Host(`exhibit-c.nara-kosensai.com`) && Path(`/`)
+      middlewares:
+        - name: exhibit-c-root-redirect
+      services:
+        - name: exhibit-proxy
+          port: 8080
+    - kind: Rule
+      match: >-
+        Host(`exhibit-c.nara-kosensai.com`) &&
+        (PathPrefix(`/dashboard`) || PathPrefix(`/api/`)) &&
+        (Method(`GET`) || Method(`HEAD`))
+      services:
+        - name: exhibit-proxy
+          port: 8080

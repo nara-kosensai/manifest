@@ -39,6 +39,8 @@ data:
         service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: exhibit-b.nara-kosensai.com
         service: http://traefik.kube-system.svc.cluster.local:80
+      - hostname: exhibit-c.nara-kosensai.com
+        service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: hr.nara-kosensai.com
         service: http://traefik.kube-system.svc.cluster.local:80
       - hostname: traefik.nara-kosensai.com

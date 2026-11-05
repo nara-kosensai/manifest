@@ -18,7 +18,7 @@ spec:
 #
 # ホスト名は管理用ホスト(grafana.*)を推測されないよう、中身と無関係な名前にしている。
 # Grafanaへは直接ではなく、レスポンス中の管理用ホスト名を書き換える
-# grafana-expo-proxy(grafana-expo-proxy.yaml)を経由させる。
+# exhibit-proxy(exhibit-proxy.yaml / exhibit-proxy.conf)を経由させる。
 # exhibit-b.nara-kosensai.com はCloudflareエッジのクライアント証明書+WAFルールで
 # 展示用PC以外を遮断する(docs/architecture.md「展示用PC向けホスト」)。
 # Grafana本体は匿名アクセスを有効にせず(有効にするとgrafana.*側にも効いてしまう)、
@@ -41,5 +41,5 @@ spec:
       middlewares:
         - name: security-headers
       services:
-        - name: grafana-expo-proxy
+        - name: exhibit-proxy
           port: 8080

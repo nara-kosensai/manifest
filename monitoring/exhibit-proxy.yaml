@@ -1,0 +1,49 @@
+# 展示用ホスト(exhibit-b.* / exhibit-c.*)の前段に置く書き換えプロキシ。
+# nginxの設定本体はexhibit-proxy.conf(kustomization.yamlのconfigMapGeneratorでConfigMap化)。
+#   exhibit-b → grafana(公開ダッシュボード)
+#   exhibit-c → Traefik Web UI(閲覧専用)
+# どちらもレスポンス中の管理用ホスト名を書き換える(docs/architecture.md「展示用PC向けホスト」)。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: exhibit-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: exhibit-proxy
+  template:
+    metadata:
+      labels:
+        app: exhibit-proxy
+    spec:
+      containers:
+        - name: nginx
+          image: nginxinc/nginx-unprivileged:1.27-alpine
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: 16Mi
+              cpu: 10m
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+      volumes:
+        - name: conf
+          configMap:
+            name: exhibit-proxy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: exhibit-proxy
+spec:
+  selector:
+    app: exhibit-proxy
+  ports:
+    - port: 8080
+      targetPort: 8080
