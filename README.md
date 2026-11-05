@@ -86,8 +86,6 @@ manifest/
 - デプロイ結果はArgoCD UIに加え、Teams(Power Automate webhook)にも通知される
   (`argocd/argocd-notifications-cm-patch.yaml`)。
 - 各Applicationの定義は`applications/`を参照。
-- `website-prod`だけは自動デプロイを解除している(`syncPolicy.automated`なし)。gitの
-  イメージタグが更新されても本番には反映されず、ArgoCD UIでの手動Syncで反映する。
 
 **新しいApplicationやリポジトリを追加する場合の注意**：Applicationは初回、
 `syncPolicy.automated`を付けずに(手動sync)作成し、`argocd app diff <name>`で

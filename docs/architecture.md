@@ -292,8 +292,7 @@ Infisical(自己ホスト)は2026-08-29付けで完全に廃止した。現在�
 ArgoCD(namespace: `argocd`、`argocd.nara-kosensai.com`でCloudflare Tunnel + Access経由公開)は
 `manifest`リポジトリの`applications/`が定義するApplication(App-of-apps、`root-app`)を
 通じて、すべて同一リポジトリ(`manifest`)の以下パスをgitから直接pullし`automated`
-(prune+selfHeal)でsyncする。ただし`website-prod`のみ`automated`を外しており(手動sync)、
-イメージタグの更新はArgoCD UIでの手動Syncで反映する。
+(prune+selfHeal)でsyncする。
 
 | Application | path | 対象 |
 | --- | --- | --- |
