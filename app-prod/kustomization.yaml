@@ -23,4 +23,4 @@ images:
   newTag: 1e7bd6e86d58a46abcdd417b96ae173fbaa0ea17
 - name: ghcr.io/fumikun/2026kosensai-frontend
   newName: ghcr.io/fumikun/2026kosensai-frontend
-  newTag: cd9a1e6beaa9f9c5e644a1a3dededeae65a706c7
+  newTag: c15bf592259ecd329379da6cef5333bf4c1d03df
