@@ -24,6 +24,12 @@ spec:
             - secretRef:
                 name: app-env
           env:
+            # deploy-prod.ymlがGitHub Secretから作成するSecret(ArgoCD管理対象外)
+            - name: TURNSTILE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: turnstile
+                  key: TURNSTILE_SECRET_KEY
             # kosensai hr 向けの全得票数API(/api/v1/admin/votes)のトークン。Secret が無ければAPIは無効。
             # 作成: kubectl -n prod create secret generic vote-admin --from-literal=VOTE_ADMIN_TOKEN=$(openssl rand -hex 32)
             - name: VOTE_ADMIN_TOKEN
